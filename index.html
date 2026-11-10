@@ -1,0 +1,2426 @@
+<!DOCTYPE html>
+<html lang="es" class="dark">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Reconstrucción Arqueológica mediante Splines Cúbicos</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.1/css/all.min.css">
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&family=JetBrains+Mono:wght@400;500;600&display=swap" rel="stylesheet">
+    <style>
+        body {
+            font-family: 'Inter', sans-serif;
+            background-color: #090d16;
+            color: #f1f5f9;
+        }
+        .font-mono {
+            font-family: 'JetBrains Mono', monospace;
+        }
+        .glass-panel {
+            background: rgba(15, 23, 42, 0.85);
+            backdrop-filter: blur(12px);
+            border: 1px solid rgba(51, 65, 85, 0.6);
+        }
+        .canvas-bg {
+            background-color: #0b1120;
+            background-image: 
+                radial-gradient(circle at 50% 50%, rgba(234, 88, 12, 0.07) 0%, transparent 70%),
+                linear-gradient(to right, rgba(30, 41, 59, 0.35) 1px, transparent 1px),
+                linear-gradient(to bottom, rgba(30, 41, 59, 0.35) 1px, transparent 1px);
+            background-size: 100% 100%, 25px 25px, 25px 25px;
+        }
+        .step-btn.active {
+            background: linear-gradient(135deg, #ea580c 0%, #d97706 100%);
+            color: #ffffff;
+            border-color: #fb923c;
+            box-shadow: 0 0 18px rgba(234, 88, 12, 0.45);
+        }
+        .custom-scroll::-webkit-scrollbar {
+            width: 6px;
+            height: 6px;
+        }
+        .custom-scroll::-webkit-scrollbar-track {
+            background: rgba(15, 23, 42, 0.6);
+        }
+        .custom-scroll::-webkit-scrollbar-thumb {
+            background: rgba(71, 85, 105, 0.8);
+            border-radius: 9999px;
+        }
+        .custom-scroll::-webkit-scrollbar-thumb:hover {
+            background: rgba(234, 88, 12, 0.8);
+        }
+    </style>
+</head>
+<body class="min-h-screen flex flex-col selection:bg-orange-500 selection:text-white">
+
+    <!-- Top Navigation Bar -->
+    <header class="glass-panel sticky top-0 z-30 border-b border-slate-800 px-4 py-3">
+        <div class="max-w-[1600px] mx-auto flex flex-wrap items-center justify-between gap-3">
+            <!-- Brand / Title -->
+            <div class="flex items-center gap-3">
+                <div class="w-10 h-10 rounded-xl bg-gradient-to-br from-orange-500 to-amber-600 flex items-center justify-center shadow-lg shadow-orange-600/30">
+                    <i class="fa-solid fa-bezier-curve text-white text-lg"></i>
+                </div>
+                <div>
+                    <div class="flex items-center gap-2">
+                        <h1 class="text-base md:text-lg font-bold tracking-tight text-white">
+                            Reconstrucción Digital Arqueológica
+                        </h1>
+                        <span class="hidden sm:inline-block px-2 py-0.5 text-[11px] font-semibold uppercase tracking-wider bg-orange-500/20 text-orange-300 border border-orange-500/30 rounded-full">
+                            Splines Cúbicos C²
+                        </span>
+                    </div>
+                    <p class="text-xs text-slate-400">
+                        Interpolación numérica, autodetección de bordes y reconstrucción progresiva en 7 etapas
+                    </p>
+                </div>
+            </div>
+
+            <!-- Main Action Controls -->
+            <div class="flex items-center flex-wrap gap-2">
+                <label for="imageUpload" class="cursor-pointer px-3.5 py-2 rounded-lg bg-orange-600 hover:bg-orange-500 text-white border border-orange-400 text-xs font-semibold flex items-center gap-2 transition-all shadow-lg shadow-orange-600/25">
+                    <i class="fa-solid fa-wand-magic-sparkles"></i>
+                    <span>Subir Imagen (Autodetectar)</span>
+                    <input type="file" id="imageUpload" accept="image/*" class="hidden">
+                </label>
+
+                <button id="btnAutoDetect" class="px-3.5 py-2 rounded-lg bg-emerald-600/20 hover:bg-emerald-600/30 text-emerald-300 border border-emerald-500/30 text-xs font-medium flex items-center gap-2 transition-all" title="Volver a escanear bordes y generar puntos automáticamente">
+                    <i class="fa-solid fa-crosshairs text-emerald-400"></i>
+                    <span>Re-Escanear Figura</span>
+                </button>
+
+                <button id="btnLoadPreset" class="px-3.5 py-2 rounded-lg bg-slate-800 hover:bg-slate-700 text-slate-200 border border-slate-700 text-xs font-medium flex items-center gap-2 transition-all">
+                    <i class="fa-solid fa-mug-hot text-amber-400"></i>
+                    <span>Ejemplo: Keru Tiwanaku</span>
+                </button>
+
+                <div class="h-6 w-[1px] bg-slate-800 mx-1 hidden sm:block"></div>
+
+                <!-- Mathematical Model Selector -->
+                <div class="flex items-center bg-slate-900 p-1 rounded-lg border border-slate-800">
+                    <button id="modeParametric" class="px-2.5 py-1 rounded text-xs font-medium bg-orange-600 text-white transition-all">
+                        Paramétrico X(t), Y(t)
+                    </button>
+                    <button id="modeExplicit" class="px-2.5 py-1 rounded text-xs font-medium text-slate-400 hover:text-white transition-all">
+                        Explícito S(x)
+                    </button>
+                </div>
+            </div>
+        </div>
+    </header>
+
+    <!-- 7 Standardized Steps Bar -->
+    <section class="bg-slate-900/90 border-b border-slate-800/80 px-4 py-2.5">
+        <div class="max-w-[1600px] mx-auto flex flex-col lg:flex-row items-center justify-between gap-3">
+            <!-- Step Buttons 1 to 7 -->
+            <div class="flex items-center gap-1.5 overflow-x-auto w-full lg:w-auto pb-1 lg:pb-0 custom-scroll">
+                <button data-step="1" class="step-btn active shrink-0 px-3 py-1.5 rounded-lg border border-slate-700 bg-slate-800/70 text-xs font-medium text-slate-300 flex items-center gap-1.5 transition-all">
+                    <span class="w-4 h-4 rounded-full bg-black/30 flex items-center justify-center text-[10px] font-bold">1</span>
+                    <span>Pieza Original</span>
+                </button>
+                <i class="fa-solid fa-chevron-right text-[10px] text-slate-600 shrink-0"></i>
+
+                <button data-step="2" class="step-btn shrink-0 px-3 py-1.5 rounded-lg border border-slate-700 bg-slate-800/70 text-xs font-medium text-slate-300 flex items-center gap-1.5 transition-all">
+                    <span class="w-4 h-4 rounded-full bg-black/30 flex items-center justify-center text-[10px] font-bold">2</span>
+                    <span>Zona Seleccionada</span>
+                </button>
+                <i class="fa-solid fa-chevron-right text-[10px] text-slate-600 shrink-0"></i>
+
+                <button data-step="3" class="step-btn shrink-0 px-3 py-1.5 rounded-lg border border-slate-700 bg-slate-800/70 text-xs font-medium text-slate-300 flex items-center gap-1.5 transition-all">
+                    <span class="w-4 h-4 rounded-full bg-black/30 flex items-center justify-center text-[10px] font-bold">3</span>
+                    <span>Puntos Pᵢ</span>
+                </button>
+                <i class="fa-solid fa-chevron-right text-[10px] text-slate-600 shrink-0"></i>
+
+                <button data-step="4" class="step-btn shrink-0 px-3 py-1.5 rounded-lg border border-slate-700 bg-slate-800/70 text-xs font-medium text-slate-300 flex items-center gap-1.5 transition-all">
+                    <span class="w-4 h-4 rounded-full bg-black/30 flex items-center justify-center text-[10px] font-bold">4</span>
+                    <span>Primeros Segmentos</span>
+                </button>
+                <i class="fa-solid fa-chevron-right text-[10px] text-slate-600 shrink-0"></i>
+
+                <button data-step="5" class="step-btn shrink-0 px-3 py-1.5 rounded-lg border border-slate-700 bg-slate-800/70 text-xs font-medium text-slate-300 flex items-center gap-1.5 transition-all">
+                    <span class="w-4 h-4 rounded-full bg-black/30 flex items-center justify-center text-[10px] font-bold">5</span>
+                    <span>Spline Completo</span>
+                </button>
+                <i class="fa-solid fa-chevron-right text-[10px] text-slate-600 shrink-0"></i>
+
+                <button data-step="6" class="step-btn shrink-0 px-3 py-1.5 rounded-lg border border-slate-700 bg-slate-800/70 text-xs font-medium text-slate-300 flex items-center gap-1.5 transition-all">
+                    <span class="w-4 h-4 rounded-full bg-black/30 flex items-center justify-center text-[10px] font-bold">6</span>
+                    <span>Reconstrucción Digital</span>
+                </button>
+                <i class="fa-solid fa-chevron-right text-[10px] text-slate-600 shrink-0"></i>
+
+                <button data-step="7" class="step-btn shrink-0 px-3 py-1.5 rounded-lg border border-slate-700 bg-slate-800/70 text-xs font-medium text-slate-300 flex items-center gap-1.5 transition-all">
+                    <span class="w-4 h-4 rounded-full bg-black/30 flex items-center justify-center text-[10px] font-bold">7</span>
+                    <span>Resultado Final</span>
+                </button>
+            </div>
+
+            <!-- Animation Player Controls -->
+            <div class="flex items-center gap-2 shrink-0">
+                <button id="btnPlayFullAnimation" class="px-4 py-1.5 rounded-lg bg-gradient-to-r from-emerald-600 to-teal-600 hover:from-emerald-500 hover:to-teal-500 text-white font-semibold text-xs flex items-center gap-2 shadow-lg shadow-emerald-600/25 transition-all">
+                    <i id="playIcon" class="fa-solid fa-play"></i>
+                    <span id="playText">Animación Progresiva (1 → 7)</span>
+                </button>
+                <button id="btnSplitCompare" class="px-3 py-1.5 rounded-lg bg-slate-800 hover:bg-slate-700 border border-slate-700 text-slate-200 text-xs font-medium flex items-center gap-1.5 transition-all">
+                    <i class="fa-solid fa-table-columns text-cyan-400"></i>
+                    <span>Antes / Después</span>
+                </button>
+            </div>
+        </div>
+    </section>
+
+    <!-- Main Workspace Grid -->
+    <main class="flex-1 max-w-[1600px] w-full mx-auto p-4 grid grid-cols-1 lg:grid-cols-12 gap-4">
+
+        <!-- Left Column: Interactive Canvas & Controls (7 Cols) -->
+        <div class="lg:col-span-7 flex flex-col gap-3">
+            <!-- Canvas Header Bar -->
+            <div class="glass-panel rounded-xl p-3 flex flex-wrap items-center justify-between gap-2">
+                <div class="flex items-center gap-2">
+                    <span id="currentStepBadge" class="px-2.5 py-1 rounded-md bg-orange-500/20 border border-orange-500/40 text-orange-300 font-mono text-xs font-semibold">
+                        PASO 1: PIEZA ORIGINAL
+                    </span>
+                    <span id="stepDescription" class="text-xs text-slate-300">
+                        Vista de la pieza arqueológica con sección faltante o borde a reconstruir.
+                    </span>
+                </div>
+
+                <!-- Interactive Tool Buttons -->
+                <div class="flex items-center flex-wrap gap-1.5">
+                    <button id="btnAutoRepairToggle" title="Activar/Desactivar reparación automática del trozo cortado o faltante" class="px-2.5 py-1.5 rounded bg-emerald-600/30 hover:bg-emerald-600/50 text-emerald-200 text-xs border border-emerald-500/50 transition-all flex items-center gap-1.5 font-semibold">
+                        <i class="fa-solid fa-puzzle-piece text-emerald-400"></i> <span id="lblAutoRepair">Autoreconstruir Parte Cortada: ON</span>
+                    </button>
+                    <button id="btnFullContourMode" title="Alternar entre Contorno Completo 360° de toda la figura o solo Perfil Lateral" class="px-2.5 py-1.5 rounded bg-orange-600/30 hover:bg-orange-600/50 text-orange-200 text-xs border border-orange-500/50 transition-all flex items-center gap-1.5 font-semibold">
+                        <i class="fa-solid fa-draw-polygon text-orange-400"></i> <span id="lblContourScope">Contorno Completo (Toda la Figura)</span>
+                    </button>
+                    <button id="btnSelectZoneMode" title="Arrastra un recuadro sobre la pieza para elegir la zona y autodetectar sus puntos" class="px-2.5 py-1.5 rounded bg-slate-800 hover:bg-slate-700 text-amber-300 text-xs border border-amber-500/30 transition-all flex items-center gap-1.5">
+                        <i class="fa-solid fa-crop-simple"></i> Seleccionar Área Manual
+                    </button>
+                    <button id="btnMirrorLeftToRight" title="Simetrizar y reparar automáticamente lados dañados en toda la figura" class="px-2.5 py-1.5 rounded bg-slate-800 hover:bg-slate-700 text-cyan-300 text-xs border border-cyan-500/30 transition-all flex items-center gap-1.5">
+                        <i class="fa-solid fa-wand-sparkles"></i> Simetrizar Figura
+                    </button>
+                    <button id="btnToggleSymmetry" title="Mostrar/Ocultar Eje de Simetría" class="px-2.5 py-1.5 rounded bg-slate-800 hover:bg-slate-700 text-slate-300 text-xs border border-slate-700 transition-all flex items-center gap-1">
+                        <i class="fa-solid fa-arrows-left-right-to-line text-cyan-400"></i> Eje
+                    </button>
+                    <button id="btnUndoPoint" title="Eliminar último punto" class="px-2.5 py-1.5 rounded bg-slate-800 hover:bg-slate-700 text-slate-300 text-xs border border-slate-700 transition-all">
+                        <i class="fa-solid fa-rotate-left"></i>
+                    </button>
+                    <button id="btnClearPoints" title="Limpiar todos los puntos" class="px-2.5 py-1.5 rounded bg-rose-950/60 hover:bg-rose-900/70 text-rose-300 text-xs border border-rose-800/50 transition-all flex items-center gap-1">
+                        <i class="fa-solid fa-trash-can"></i>
+                    </button>
+                </div>
+            </div>
+
+            <!-- Interactive Canvas Container -->
+            <div class="relative rounded-2xl overflow-hidden border border-slate-700/80 shadow-2xl canvas-bg flex items-center justify-center aspect-[4/3] w-full select-none" id="canvasContainer">
+                <canvas id="splineCanvas" width="800" height="600" class="w-full h-full block cursor-crosshair"></canvas>
+
+                <!-- Toast Notification for Auto-Detection -->
+                <div id="autoDetectToast" class="hidden absolute top-12 left-1/2 -translate-x-1/2 px-4 py-2 rounded-xl bg-emerald-950/95 border border-emerald-500/50 text-emerald-200 text-xs font-medium shadow-2xl flex items-center gap-2 z-20 pointer-events-none">
+                    <i class="fa-solid fa-wand-magic-sparkles text-emerald-400"></i>
+                    <span id="autoDetectToastText">Contorno detectado automáticamente</span>
+                </div>
+
+                <!-- Floating Coordinates HUD -->
+                <div class="absolute top-3 left-3 pointer-events-none flex flex-col gap-1.5">
+                    <div class="px-2.5 py-1 rounded-md bg-slate-950/85 border border-slate-800 text-[11px] font-mono text-slate-300 flex items-center gap-2">
+                        <span class="w-2 h-2 rounded-full bg-emerald-400 animate-pulse"></span>
+                        <span>Cursor: <strong id="hudCoords" class="text-white">(0, 0)</strong> px</span>
+                    </div>
+                    <div class="px-2.5 py-1 rounded-md bg-slate-950/85 border border-slate-800 text-[11px] font-mono text-slate-300">
+                        Puntos Pᵢ: <strong id="hudPointCount" class="text-orange-400">10</strong> | Tramos Sᵢ: <strong id="hudSegmentCount" class="text-cyan-400">9</strong>
+                    </div>
+                </div>
+
+                <!-- Interactive Help Overlay Bottom -->
+                <div class="absolute bottom-3 left-3 right-3 pointer-events-none flex flex-wrap items-center justify-between gap-2 text-[11px] text-slate-300 bg-slate-950/85 border border-slate-800/90 px-3 py-1.5 rounded-lg">
+                    <span><i class="fa-solid fa-mouse-pointer text-orange-400 mr-1"></i> <strong>Clic Izq:</strong> Añadir o arrastrar punto Pᵢ</span>
+                    <span><i class="fa-solid fa-crop-simple text-amber-400 mr-1"></i> <strong>Seleccionar Área:</strong> Recuadro de autodetección</span>
+                    <span><i class="fa-solid fa-ban text-rose-400 mr-1"></i> <strong>Clic Der sobre punto:</strong> Eliminar nodo</span>
+                </div>
+            </div>
+
+            <!-- Sliders & Fine-Tuning Bar -->
+            <div class="glass-panel rounded-xl p-3.5 grid grid-cols-1 sm:grid-cols-4 gap-4 items-center">
+                <div>
+                    <div class="flex justify-between text-xs mb-1">
+                        <span class="text-slate-400 font-medium">Tramos activos (Paso 4):</span>
+                        <span id="lblActiveSegments" class="font-mono text-orange-400 font-semibold">3 tramos</span>
+                    </div>
+                    <input type="range" id="sliderSegments" min="1" max="9" value="3" class="w-full accent-orange-500 cursor-pointer">
+                </div>
+
+                <div>
+                    <div class="flex justify-between text-xs mb-1">
+                        <span class="text-slate-400 font-medium">Sensibilidad Borde:</span>
+                        <span id="lblSensitivity" class="font-mono text-emerald-400 font-semibold">32</span>
+                    </div>
+                    <input type="range" id="sliderSensitivity" min="10" max="85" value="32" class="w-full accent-emerald-500 cursor-pointer" title="Ajusta la sensibilidad para detectar todos los lados de tu foto">
+                </div>
+
+                <div>
+                    <div class="flex justify-between text-xs mb-1">
+                        <span class="text-slate-400 font-medium">Opacidad Imagen Base:</span>
+                        <span id="lblBgOpacity" class="font-mono text-cyan-400 font-semibold">88%</span>
+                    </div>
+                    <input type="range" id="sliderBgOpacity" min="15" max="100" value="88" class="w-full accent-cyan-500 cursor-pointer">
+                </div>
+
+                <div class="flex items-center justify-end gap-3">
+                    <label class="flex items-center gap-2 text-xs text-slate-300 cursor-pointer">
+                        <input type="checkbox" id="chkShowGrid" checked class="rounded accent-orange-500">
+                        <span>Cuadrícula</span>
+                    </label>
+                    <label class="flex items-center gap-2 text-xs text-slate-300 cursor-pointer">
+                        <input type="checkbox" id="chkFillPolygon" checked class="rounded accent-orange-500">
+                        <span>Relleno</span>
+                    </label>
+                </div>
+            </div>
+        </div>
+
+        <!-- Right Column: Coordinates, Cubic Spline Equations, Continuity & Code (5 Cols) -->
+        <div class="lg:col-span-5 flex flex-col gap-3">
+
+            <!-- Right Panel Tabs -->
+            <div class="glass-panel rounded-xl p-1.5 grid grid-cols-3 gap-1">
+                <button data-tab="tabMath" class="tab-btn py-2 px-3 rounded-lg text-xs font-semibold bg-slate-800 text-orange-400 border border-slate-700 transition-all flex items-center justify-center gap-1.5">
+                    <i class="fa-solid fa-square-root-variable"></i>
+                    <span>Puntos y Ecuaciones</span>
+                </button>
+                <button data-tab="tabTheory" class="tab-btn py-2 px-3 rounded-lg text-xs font-semibold text-slate-400 hover:text-white transition-all flex items-center justify-center gap-1.5">
+                    <i class="fa-solid fa-wave-square"></i>
+                    <span>Modelo y Continuidad</span>
+                </button>
+                <button data-tab="tabCode" class="tab-btn py-2 px-3 rounded-lg text-xs font-semibold text-slate-400 hover:text-white transition-all flex items-center justify-center gap-1.5">
+                    <i class="fa-solid fa-code"></i>
+                    <span>Código del Spline</span>
+                </button>
+            </div>
+
+            <!-- TAB 1: Puntos de Control y Polinomios Cúbicos Calculados -->
+            <div id="tabMath" class="tab-content flex-1 flex flex-col gap-3">
+                <!-- Control Points Table -->
+                <div class="glass-panel rounded-xl p-4 flex flex-col">
+                    <div class="flex items-center justify-between mb-2.5">
+                        <div>
+                            <h2 class="text-sm font-bold text-white flex items-center gap-2">
+                                <i class="fa-solid fa-location-crosshairs text-orange-400"></i>
+                                Coordenadas de Puntos de Control Pᵢ = (Xᵢ, Yᵢ)
+                            </h2>
+                            <p class="text-[11px] text-slate-400">
+                                Nodos extraídos sobre el borde de la pieza (rango óptimo: 8 a 15 puntos)
+                            </p>
+                        </div>
+                        <span id="badgePointStatus" class="px-2 py-0.5 rounded text-[11px] font-mono bg-emerald-500/20 text-emerald-300 border border-emerald-500/30">
+                            Óptimo (10 pts)
+                        </span>
+                    </div>
+
+                    <div class="overflow-y-auto max-h-48 rounded-lg border border-slate-800 custom-scroll">
+                        <table class="w-full text-left border-collapse text-xs font-mono">
+                            <thead class="bg-slate-900/90 text-slate-400 sticky top-0">
+                                <tr>
+                                    <th class="py-2 px-3 border-b border-slate-800">Nodo</th>
+                                    <th class="py-2 px-3 border-b border-slate-800">Parámetro tᵢ</th>
+                                    <th class="py-2 px-3 border-b border-slate-800">Coord Xᵢ (px)</th>
+                                    <th class="py-2 px-3 border-b border-slate-800">Coord Yᵢ (px)</th>
+                                    <th class="py-2 px-3 border-b border-slate-800 text-right">Acción</th>
+                                </tr>
+                            </thead>
+                            <tbody id="pointsTableBody" class="divide-y divide-slate-800/60 bg-slate-950/40">
+                                <!-- Populated dynamically -->
+                            </tbody>
+                        </table>
+                    </div>
+                </div>
+
+                <!-- Calculated Cubic Polynomials Per Interval -->
+                <div class="glass-panel rounded-xl p-4 flex-1 flex flex-col">
+                    <div class="flex items-center justify-between mb-2.5">
+                        <div>
+                            <h2 class="text-sm font-bold text-white flex items-center gap-2">
+                                <i class="fa-solid fa-superscript text-cyan-400"></i>
+                                Polinomios Cúbicos por Tramo [tᵢ, tᵢ₊₁]
+                            </h2>
+                            <p id="eqFormulaSubtitle" class="text-[11px] text-slate-400 font-mono">
+                                Xᵢ(t) = aₓ + bₓ(t-tᵢ) + cₓ(t-tᵢ)² + dₓ(t-tᵢ)³  |  Yᵢ(t) = aᵧ + bᵧ(t-tᵢ) + cᵧ(t-tᵢ)² + dᵧ(t-tᵢ)³
+                            </p>
+                        </div>
+                    </div>
+
+                    <div id="equationsContainer" class="overflow-y-auto max-h-72 space-y-2 pr-1 custom-scroll font-mono text-xs">
+                        <!-- Populated dynamically with actual spline coefficients -->
+                    </div>
+                </div>
+            </div>
+
+            <!-- TAB 2: Explicación Matemática y Continuidad C0, C1, C2 -->
+            <div id="tabTheory" class="tab-content hidden flex-1 flex flex-col gap-3">
+                <div class="glass-panel rounded-xl p-4 space-y-4 overflow-y-auto max-h-[560px] custom-scroll">
+                    <div class="p-3.5 rounded-xl bg-gradient-to-r from-orange-500/10 to-amber-500/10 border border-orange-500/30">
+                        <h3 class="text-xs font-bold uppercase tracking-wider text-orange-300 mb-1">
+                            Secuencia Conceptual Aplicada
+                        </h3>
+                        <p class="text-xs text-slate-200 leading-relaxed">
+                            Pieza Arqueológica → Puntos de Control <span class="font-mono text-orange-300">Pᵢ=(Xᵢ,Yᵢ)</span> → Sistema Tridiagonal → Spline Cúbico → Reconstrucción Digital Animada.
+                        </p>
+                    </div>
+
+                    <!-- Option A & B Mathematical Formulation -->
+                    <div class="space-y-3">
+                        <div class="p-3 rounded-lg bg-slate-900/90 border border-slate-800">
+                            <div class="flex items-center justify-between mb-1">
+                                <span class="text-xs font-bold text-cyan-400">a) Spline Cúbico Paramétrico (Activo para perfiles verticales)</span>
+                                <span class="text-[10px] px-2 py-0.5 rounded bg-cyan-500/20 text-cyan-300">Recomendado</span>
+                            </div>
+                            <p class="text-xs text-slate-400 mb-2">
+                                Permite reconstruir bordes cerámicos que curvan hacia adentro y hacia afuera sin restricción de función <span class="font-mono">y(x)</span>:
+                            </p>
+                            <div class="p-2.5 rounded bg-slate-950 border border-slate-800 font-mono text-xs text-slate-200 space-y-1">
+                                <div>Xᵢ(t) = aₓ,ᵢ + bₓ,ᵢ(t - tᵢ) + cₓ,ᵢ(t - tᵢ)² + dₓ,ᵢ(t - tᵢ)³</div>
+                                <div>Yᵢ(t) = aᵧ,ᵢ + bᵧ,ᵢ(t - tᵢ) + cᵧ,ᵢ(t - tᵢ)² + dᵧ,ᵢ(t - tᵢ)³</div>
+                            </div>
+                        </div>
+
+                        <div class="p-3 rounded-lg bg-slate-900/90 border border-slate-800">
+                            <span class="text-xs font-bold text-amber-400 block mb-1">b) Spline Cúbico Explícito</span>
+                            <p class="text-xs text-slate-400 mb-2">
+                                Expresado tramo a tramo cuando las coordenadas están ordenadas de forma estrictamente monótona:
+                            </p>
+                            <div class="p-2.5 rounded bg-slate-950 border border-slate-800 font-mono text-xs text-slate-200">
+                                Sᵢ(x) = aᵢ + bᵢ(x - xᵢ) + cᵢ(x - xᵢ)² + dᵢ(x - xᵢ)³
+                            </div>
+                        </div>
+                    </div>
+
+                    <!-- Continuity Conditions C0, C1, C2 -->
+                    <div>
+                        <h3 class="text-xs font-bold uppercase tracking-wider text-slate-300 mb-2 flex items-center gap-2">
+                            <i class="fa-solid fa-link text-emerald-400"></i>
+                            Condiciones de Continuidad Garantizadas
+                        </h3>
+                        <div class="grid grid-cols-1 gap-2">
+                            <div class="p-3 rounded-lg bg-slate-900/70 border border-slate-800 flex items-start gap-3">
+                                <span class="px-2 py-1 rounded bg-emerald-500/20 text-emerald-300 font-mono text-xs font-bold shrink-0">C⁰</span>
+                                <div class="text-xs">
+                                    <strong class="text-white block">Continuidad de Posición:</strong>
+                                    <span class="text-slate-400">Los tramos coinciden exactamente en cada nodo interior: </span>
+                                    <span class="font-mono text-emerald-300">Sᵢ(tᵢ₊₁) = Sᵢ₊₁(tᵢ₊₁) = Pᵢ₊₁</span>
+                                </div>
+                            </div>
+                            <div class="p-3 rounded-lg bg-slate-900/70 border border-slate-800 flex items-start gap-3">
+                                <span class="px-2 py-1 rounded bg-cyan-500/20 text-cyan-300 font-mono text-xs font-bold shrink-0">C¹</span>
+                                <div class="text-xs">
+                                    <strong class="text-white block">Continuidad de Pendiente (1ra Derivada):</strong>
+                                    <span class="text-slate-400">Transición suave sin esquinas ni picos bruscos en las uniones: </span>
+                                    <span class="font-mono text-cyan-300">S'ᵢ(tᵢ₊₁) = S'ᵢ₊₁(tᵢ₊₁)</span>
+                                </div>
+                            </div>
+                            <div class="p-3 rounded-lg bg-slate-900/70 border border-slate-800 flex items-start gap-3">
+                                <span class="px-2 py-1 rounded bg-purple-500/20 text-purple-300 font-mono text-xs font-bold shrink-0">C²</span>
+                                <div class="text-xs">
+                                    <strong class="text-white block">Continuidad de Curvatura (2da Derivada):</strong>
+                                    <span class="text-slate-400">Inflexión continua y frontera natural libre: </span>
+                                    <span class="font-mono text-purple-300">S''ᵢ(tᵢ₊₁) = S''ᵢ₊₁(tᵢ₊₁)</span>, con <span class="font-mono text-purple-300">S''(t₀) = S''(tₙ) = 0</span>.
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            <!-- TAB 3: Código de Implementación (Para mostrar en el video) -->
+            <div id="tabCode" class="tab-content hidden flex-1 flex flex-col gap-3">
+                <div class="glass-panel rounded-xl p-4 flex-1 flex flex-col">
+                    <div class="flex items-center justify-between mb-2">
+                        <div>
+                            <h2 class="text-sm font-bold text-white flex items-center gap-2">
+                                <i class="fa-solid fa-terminal text-emerald-400"></i>
+                                Algoritmo de Resolución de Splines Cúbicos Naturales
+                            </h2>
+                            <p class="text-[11px] text-slate-400">
+                                Fragmento clave empleado en esta aplicación para calcular coeficientes y animar la curva
+                            </p>
+                        </div>
+                    </div>
+                    <pre class="flex-1 overflow-x-auto overflow-y-auto max-h-[500px] p-3.5 rounded-xl bg-slate-950 border border-slate-800 text-[11px] font-mono text-slate-300 leading-relaxed custom-scroll"><code><span class="text-slate-500">// 1. Cálculo de coeficientes del Spline Cúbico Natural: S_i(t) = a_i + b_i*dt + c_i*dt^2 + d_i*dt^3</span>
+<span class="text-orange-400">function</span> <span class="text-cyan-300">solveNaturalCubicSpline</span>(t, y) {
+    <span class="text-orange-400">const</span> n = y.length - <span class="text-amber-300">1</span>;
+    <span class="text-orange-400">const</span> h = [], alpha = <span class="text-orange-400">new</span> Array(n).fill(<span class="text-amber-300">0</span>);
+    <span class="text-orange-400">const</span> a = [...y], b = <span class="text-orange-400">new</span> Array(n), c = <span class="text-orange-400">new</span> Array(n + <span class="text-amber-300">1</span>).fill(<span class="text-amber-300">0</span>), d = <span class="text-orange-400">new</span> Array(n);
+
+    <span class="text-slate-500">// Paso h_i de cada subintervalo [t_i, t_{i+1}]</span>
+    <span class="text-orange-400">for</span> (<span class="text-orange-400">let</span> i = <span class="text-amber-300">0</span>; i &lt; n; i++) h.push(t[i + <span class="text-amber-300">1</span>] - t[i]);
+
+    <span class="text-slate-500">// Construcción del sistema tridiagonal para garantizar continuidad C0, C1 y C2</span>
+    <span class="text-orange-400">for</span> (<span class="text-orange-400">let</span> i = <span class="text-amber-300">1</span>; i &lt; n; i++) {
+        alpha[i] = (<span class="text-amber-300">3</span> / h[i]) * (a[i + <span class="text-amber-300">1</span>] - a[i]) - (<span class="text-amber-300">3</span> / h[i - <span class="text-amber-300">1</span>]) * (a[i] - a[i - <span class="text-amber-300">1</span>]);
+    }
+
+    <span class="text-slate-500">// Algoritmo de Thomas (Eliminación Gaussiana Tridiagonal)</span>
+    <span class="text-orange-400">const</span> l = <span class="text-orange-400">new</span> Array(n + <span class="text-amber-300">1</span>).fill(<span class="text-amber-300">1</span>), mu = <span class="text-orange-400">new</span> Array(n + <span class="text-amber-300">1</span>).fill(<span class="text-amber-300">0</span>), z = <span class="text-orange-400">new</span> Array(n + <span class="text-amber-300">1</span>).fill(<span class="text-amber-300">0</span>);
+    <span class="text-orange-400">for</span> (<span class="text-orange-400">let</span> i = <span class="text-amber-300">1</span>; i &lt; n; i++) {
+        l[i] = <span class="text-amber-300">2</span> * (t[i + <span class="text-amber-300">1</span>] - t[i - <span class="text-amber-300">1</span>]) - h[i - <span class="text-amber-300">1</span>] * mu[i - <span class="text-amber-300">1</span>];
+        mu[i] = h[i] / l[i];
+        z[i] = (alpha[i] - h[i - <span class="text-amber-300">1</span>] * z[i - <span class="text-amber-300">1</span>]) / l[i];
+    }
+
+    <span class="text-slate-500">// Sustitución regresiva para hallar c_i, b_i y d_i</span>
+    <span class="text-orange-400">for</span> (<span class="text-orange-400">let</span> j = n - <span class="text-amber-300">1</span>; j &gt;= <span class="text-amber-300">0</span>; j--) {
+        c[j] = z[j] - mu[j] * c[j + <span class="text-amber-300">1</span>];
+        b[j] = (a[j + <span class="text-amber-300">1</span>] - a[j]) / h[j] - h[j] * (c[j + <span class="text-amber-300">1</span>] + <span class="text-amber-300">2</span> * c[j]) / <span class="text-amber-300">3</span>;
+        d[j] = (c[j + <span class="text-amber-300">1</span>] - c[j]) / (<span class="text-amber-300">3</span> * h[j]);
+    }
+    <span class="text-orange-400">return</span> { a, b, c, d, t };
+}
+
+<span class="text-slate-500">// 2. Evaluación Paramétrica (X_i(t), Y_i(t)) para generar la animación continua</span>
+<span class="text-orange-400">function</span> <span class="text-cyan-300">evaluateParametricSpline</span>(splineX, splineY, i, tVal) {
+    <span class="text-orange-400">const</span> dt = tVal - splineX.t[i];
+    <span class="text-orange-400">const</span> x = splineX.a[i] + splineX.b[i]*dt + splineX.c[i]*dt*dt + splineX.d[i]*dt*dt*dt;
+    <span class="text-orange-400">const</span> y = splineY.a[i] + splineY.b[i]*dt + splineY.c[i]*dt*dt + splineY.d[i]*dt*dt*dt;
+    <span class="text-orange-400">return</span> { x, y };
+}</code></pre>
+                </div>
+            </div>
+
+        </div>
+    </main>
+
+    <script>
+        /***********************************************************************
+         * 1. MOTOR MATEMÁTICO: SPLINES CÚBICOS NATURALES (C0, C1, C2)
+         ***********************************************************************/
+        function solveNaturalCubicSpline(t, y) {
+            const n = y.length - 1;
+            if (n < 1) return null;
+            if (n === 1) {
+                const h0 = (t[1] - t[0]) || 1;
+                return {
+                    a: [y[0]],
+                    b: [(y[1] - y[0]) / h0],
+                    c: [0, 0],
+                    d: [0],
+                    t: [...t]
+                };
+            }
+
+            const h = new Array(n);
+            for (let i = 0; i < n; i++) {
+                h[i] = (t[i + 1] - t[i]) || 1e-6;
+            }
+
+            const alpha = new Array(n).fill(0);
+            for (let i = 1; i < n; i++) {
+                alpha[i] = (3 / h[i]) * (y[i + 1] - y[i]) - (3 / h[i - 1]) * (y[i] - y[i - 1]);
+            }
+
+            const l = new Array(n + 1).fill(1);
+            const mu = new Array(n + 1).fill(0);
+            const z = new Array(n + 1).fill(0);
+
+            for (let i = 1; i < n; i++) {
+                l[i] = 2 * (t[i + 1] - t[i - 1]) - h[i - 1] * mu[i - 1];
+                if (Math.abs(l[i]) < 1e-9) l[i] = 1e-6;
+                mu[i] = h[i] / l[i];
+                z[i] = (alpha[i] - h[i - 1] * z[i - 1]) / l[i];
+            }
+
+            const a = [...y];
+            const b = new Array(n).fill(0);
+            const c = new Array(n + 1).fill(0);
+            const d = new Array(n).fill(0);
+
+            for (let j = n - 1; j >= 0; j--) {
+                c[j] = z[j] - mu[j] * c[j + 1];
+                b[j] = (a[j + 1] - a[j]) / h[j] - (h[j] * (c[j + 1] + 2 * c[j])) / 3;
+                d[j] = (c[j + 1] - c[j]) / (3 * h[j]);
+            }
+
+            return { a, b, c, d, t: [...t] };
+        }
+
+        function evaluateSplineSegment(spline, segIdx, val) {
+            const dt = val - spline.t[segIdx];
+            return spline.a[segIdx] +
+                   spline.b[segIdx] * dt +
+                   spline.c[segIdx] * dt * dt +
+                   spline.d[segIdx] * dt * dt * dt;
+        }
+
+        function computeCurrentSplines(points, mode, closeLoop = false) {
+            if (!points || points.length < 2) return null;
+
+            if (mode === 'explicit') {
+                // Ordenar por coordenada vertical Y para evaluar X = S(Y)
+                const sorted = [...points].sort((p1, p2) => p1.y - p2.y);
+                const yParam = sorted.map((p, idx) => p.y + idx * 0.01);
+                const xVals = sorted.map(p => p.x);
+                const splineXofY = solveNaturalCubicSpline(yParam, xVals);
+                return {
+                    mode: 'explicit',
+                    pointsUsed: sorted,
+                    tParams: yParam,
+                    splineX: splineXofY,
+                    splineY: null,
+                    closed: false
+                };
+            } else {
+                // Parametrización CENTRÍPETA (raíz cuadrada de la distancia: dt = sqrt(d)) + envoltura periódica
+                // Evita cualquier abombamiento, bucle o deformación respecto a la silueta original
+                const n = points.length;
+                if (closeLoop && n >= 3) {
+                    const wrapCount = Math.min(3, n);
+                    const extPts = [];
+                    for (let i = n - wrapCount; i < n; i++) extPts.push(points[i]);
+                    for (let i = 0; i <= n; i++) extPts.push(points[i % n]);
+                    for (let i = 1; i <= wrapCount; i++) extPts.push(points[i % n]);
+
+                    const extT = [0];
+                    for (let i = 1; i < extPts.length; i++) {
+                        const d = Math.hypot(extPts[i].x - extPts[i - 1].x, extPts[i].y - extPts[i - 1].y);
+                        extT.push(extT[i - 1] + Math.max(0.5, Math.sqrt(d)));
+                    }
+
+                    const fullSplineX = solveNaturalCubicSpline(extT, extPts.map(p => p.x));
+                    const fullSplineY = solveNaturalCubicSpline(extT, extPts.map(p => p.y));
+
+                    const startOffset = extT[wrapCount];
+                    const tParams = extT.slice(wrapCount, wrapCount + n + 1).map(t => t - startOffset);
+
+                    const splineX = {
+                        a: fullSplineX.a.slice(wrapCount, wrapCount + n),
+                        b: fullSplineX.b.slice(wrapCount, wrapCount + n),
+                        c: fullSplineX.c.slice(wrapCount, wrapCount + n + 1),
+                        d: fullSplineX.d.slice(wrapCount, wrapCount + n),
+                        t: tParams
+                    };
+                    const splineY = {
+                        a: fullSplineY.a.slice(wrapCount, wrapCount + n),
+                        b: fullSplineY.b.slice(wrapCount, wrapCount + n),
+                        c: fullSplineY.c.slice(wrapCount, wrapCount + n + 1),
+                        d: fullSplineY.d.slice(wrapCount, wrapCount + n),
+                        t: tParams
+                    };
+
+                    return {
+                        mode: 'parametric',
+                        pointsUsed: points,
+                        tParams,
+                        splineX,
+                        splineY,
+                        closed: true
+                    };
+                } else {
+                    const workingPts = [...points];
+                    const tParams = [0];
+                    for (let i = 1; i < workingPts.length; i++) {
+                        const d = Math.hypot(workingPts[i].x - workingPts[i - 1].x, workingPts[i].y - workingPts[i - 1].y);
+                        tParams.push(tParams[i - 1] + Math.max(0.5, Math.sqrt(d)));
+                    }
+                    const xVals = workingPts.map(p => p.x);
+                    const yVals = workingPts.map(p => p.y);
+                    const splineX = solveNaturalCubicSpline(tParams, xVals);
+                    const splineY = solveNaturalCubicSpline(tParams, yVals);
+                    return {
+                        mode: 'parametric',
+                        pointsUsed: points,
+                        tParams,
+                        splineX,
+                        splineY,
+                        closed: false
+                    };
+                }
+            }
+        }
+
+        /***********************************************************************
+         * 2. ESTADO DE LA APLICACIÓN Y PIEZA ARQUEOLÓGICA POR DEFECTO
+         ***********************************************************************/
+        const canvas = document.getElementById('splineCanvas');
+        const ctx = canvas.getContext('2d');
+
+        // Canvas auxiliar en memoria para escanear píxeles de imágenes subidas
+        const offCanvas = document.createElement('canvas');
+        offCanvas.width = 800;
+        offCanvas.height = 600;
+        const offCtx = offCanvas.getContext('2d', { willReadFrequently: true });
+
+        const state = {
+            width: 800,
+            height: 600,
+            step: 1,
+            mode: 'parametric',
+            fullObjectContour: true,
+            autoRepairCutout: true,
+            points: [],
+            rawDamagedContour: [],
+            fractureZones: [],
+            activeSegmentsCount: 6,
+            bgOpacity: 0.88,
+            edgeThreshold: 32,
+            showGrid: true,
+            fillPolygon: true,
+            showSymmetry: true,
+            symmetryAxisX: 390,
+            splitComparison: false,
+            uploadedImage: null,
+            uploadedImageDrawBounds: null,
+            detectedClayColor: { r: 168, g: 64, b: 25 },
+            roiBox: { x: 220, y: 108, w: 340, h: 405 },
+            showROI: false,
+            selectingROIMode: false,
+            isDrawingROI: false,
+            roiStartPos: { x: 0, y: 0 },
+            draggingPointIdx: -1,
+            draggingSymmetry: false,
+            animating: false,
+            animFrameId: null,
+            splineProgress: 1.0,
+            pointRevealProgress: 1.0
+        };
+
+        // Puntos del contorno COMPLETO (360°) de la vasija Keru Tiwanaku (Izquierda + Base + Derecha reconstruida + Boca)
+        const DEFAULT_KERU_FULL_POINTS = [
+            { x: 235, y: 125, isCorner: true },  // P0: Esquina superior izquierda (Boca)
+            { x: 252, y: 160 },                  // P1: Borde alto izquierdo
+            { x: 276, y: 215 },                  // P2: Cuello izquierdo
+            { x: 295, y: 268 },                  // P3: Cintura superior izquierda
+            { x: 282, y: 295, isCorner: true },  // P4: Esquina anillo central izquierdo
+            { x: 300, y: 322 },                  // P5: Cintura inferior izquierda
+            { x: 309, y: 385 },                  // P6: Cuerpo inferior izquierdo
+            { x: 306, y: 455 },                  // P7: Talón izquierdo
+            { x: 288, y: 495, isCorner: true },  // P8: Esquina inferior izquierda (Base)
+            { x: 338, y: 496 },                  // P9: Base izquierda
+            { x: 390, y: 496 },                  // P10: Centro de la base
+            { x: 442, y: 496 },                  // P11: Base derecha
+            { x: 492, y: 495, isCorner: true },  // P12: Esquina inferior derecha (Base)
+            { x: 474, y: 455 },                  // P13: Talón derecho (Reconstruido)
+            { x: 471, y: 385 },                  // P14: Cuerpo inferior derecho (Reconstruido)
+            { x: 480, y: 322 },                  // P15: Cintura inferior derecha (Reconstruida)
+            { x: 498, y: 295, isCorner: true },  // P16: Esquina anillo central derecho (Reconstruido)
+            { x: 485, y: 268 },                  // P17: Cintura superior derecha (Reconstruida)
+            { x: 504, y: 215 },                  // P18: Cuello derecho (Reconstruido)
+            { x: 528, y: 160 },                  // P19: Borde alto derecho (Reconstruido)
+            { x: 545, y: 125, isCorner: true },  // P20: Esquina superior derecha (Boca)
+            { x: 468, y: 125 },                  // P21: Boca superior derecha
+            { x: 390, y: 125 },                  // P22: Centro boca superior
+            { x: 312, y: 125 }                   // P23: Boca superior izquierda
+        ];
+
+        // Puntos de solo mitad derecha por si el usuario cambia a modo perfil simple
+        const DEFAULT_KERU_HALF_POINTS = [
+            { x: 545, y: 125 },
+            { x: 522, y: 170 },
+            { x: 500, y: 220 },
+            { x: 484, y: 270 },
+            { x: 498, y: 295 },
+            { x: 480, y: 320 },
+            { x: 472, y: 375 },
+            { x: 468, y: 430 },
+            { x: 478, y: 472 },
+            { x: 492, y: 495 }
+        ];
+
+        function showToast(msg) {
+            const toast = document.getElementById('autoDetectToast');
+            document.getElementById('autoDetectToastText').textContent = msg;
+            toast.classList.remove('hidden');
+            clearTimeout(window._toastTimer);
+            window._toastTimer = setTimeout(() => {
+                toast.classList.add('hidden');
+            }, 3800);
+        }
+
+        function loadKeruPreset() {
+            state.uploadedImage = null;
+            state.uploadedImageDrawBounds = null;
+            state.rawDamagedContour = [];
+            state.fractureZones = [{ yStart: 125, yEnd: 465, side: 'right' }];
+            state.symmetryAxisX = 390;
+            state.detectedClayColor = { r: 175, g: 68, b: 28 };
+            if (state.fullObjectContour) {
+                state.roiBox = { x: 220, y: 108, w: 340, h: 405 };
+                state.points = DEFAULT_KERU_FULL_POINTS.map(p => ({ ...p }));
+            } else {
+                state.roiBox = { x: 388, y: 105, w: 185, h: 410 };
+                state.points = DEFAULT_KERU_HALF_POINTS.map(p => ({ ...p }));
+            }
+            state.activeSegmentsCount = Math.min(6, getTotalSegmentsCount());
+            updateSegmentSliderBounds();
+            refreshUI();
+        }
+
+        function getTotalSegmentsCount() {
+            if (state.points.length < 2) return 0;
+            return (state.fullObjectContour && state.mode === 'parametric' && state.points.length >= 3)
+                ? state.points.length
+                : state.points.length - 1;
+        }
+
+        /***********************************************************************
+         * 3. VISIÓN POR COMPUTADORA: AUTODETECCIÓN DE TODA LA FIGURA Y ESQUINAS
+         ***********************************************************************/
+        // Algoritmo Ramer-Douglas-Peucker para detectar todas las esquinas y quiebres geométricos sin perder ninguno
+        function simplifyPolygonKeepCorners(points, epsilon) {
+            if (points.length <= 2) return points;
+            let maxDist = 0;
+            let index = 0;
+            const start = points[0];
+            const end = points[points.length - 1];
+            const dx = end.x - start.x;
+            const dy = end.y - start.y;
+            const lenSq = dx * dx + dy * dy;
+
+            for (let i = 1; i < points.length - 1; i++) {
+                let dist = 0;
+                if (lenSq === 0) {
+                    dist = Math.hypot(points[i].x - start.x, points[i].y - start.y);
+                } else {
+                    const t = Math.max(0, Math.min(1, ((points[i].x - start.x) * dx + (points[i].y - start.y) * dy) / lenSq));
+                    const projX = start.x + t * dx;
+                    const projY = start.y + t * dy;
+                    dist = Math.hypot(points[i].x - projX, points[i].y - projY);
+                }
+                if (dist > maxDist) {
+                    index = i;
+                    maxDist = dist;
+                }
+            }
+
+            if (maxDist > epsilon) {
+                const left = simplifyPolygonKeepCorners(points.slice(0, index + 1), epsilon);
+                const right = simplifyPolygonKeepCorners(points.slice(index), epsilon);
+                return [...left.slice(0, left.length - 1), { ...right[0], isCorner: true }, ...right.slice(1)];
+            } else {
+                return [start, end];
+            }
+        }
+
+        // Subdividir tramos largos entre esquina y esquina para que el Spline Cúbico no se deforme ni redondee las esquinas
+        function densifyBetweenCorners(cornerPolygon, maxSegmentLength = 52) {
+            const result = [];
+            const n = cornerPolygon.length;
+            for (let i = 0; i < n; i++) {
+                const p1 = cornerPolygon[i];
+                const p2 = cornerPolygon[(i + 1) % n];
+                result.push({ x: Math.round(p1.x), y: Math.round(p1.y), isCorner: !!p1.isCorner });
+
+                const dist = Math.hypot(p2.x - p1.x, p2.y - p1.y);
+                if (dist > maxSegmentLength) {
+                    const numIntermediate = Math.min(4, Math.floor(dist / maxSegmentLength));
+                    for (let k = 1; k <= numIntermediate; k++) {
+                        const frac = k / (numIntermediate + 1);
+                        result.push({
+                            x: Math.round(p1.x + frac * (p2.x - p1.x)),
+                            y: Math.round(p1.y + frac * (p2.y - p1.y)),
+                            isCorner: false
+                        });
+                    }
+                }
+            }
+            return result;
+        }
+
+        function autoDetectUploadedObject(customROI = null) {
+            if (!state.uploadedImage) {
+                loadKeruPreset();
+                showToast(`Contorno y esquinas restaurados (${state.points.length} nodos alrededor de toda la pieza)`);
+                return;
+            }
+
+            const img = state.uploadedImage;
+            offCtx.clearRect(0, 0, state.width, state.height);
+
+            const scale = Math.min(state.width / img.width, state.height / img.height) * 0.88;
+            const drawW = img.width * scale;
+            const drawH = img.height * scale;
+            const drawX = (state.width - drawW) / 2;
+            const drawY = (state.height - drawH) / 2;
+            state.uploadedImageDrawBounds = { drawX, drawY, drawW, drawH };
+
+            offCtx.drawImage(img, drawX, drawY, drawW, drawH);
+            const imgData = offCtx.getImageData(0, 0, state.width, state.height);
+            const data = imgData.data;
+
+            // El área de reconstrucción abarca POR DEFECTO TODA LA IMAGEN COMPLETA
+            const minX = customROI ? Math.max(Math.floor(drawX + 1), Math.floor(customROI.x)) : Math.floor(drawX + 1);
+            const maxX = customROI ? Math.min(Math.floor(drawX + drawW - 1), Math.floor(customROI.x + customROI.w)) : Math.floor(drawX + drawW - 1);
+            const minY = customROI ? Math.max(Math.floor(drawY + 1), Math.floor(customROI.y)) : Math.floor(drawY + 1);
+            const maxY = customROI ? Math.min(Math.floor(drawY + drawH - 1), Math.floor(customROI.y + customROI.h)) : Math.floor(drawY + drawH - 1);
+
+            function getPixel(x, y) {
+                const cx = Math.max(0, Math.min(state.width - 1, Math.floor(x)));
+                const cy = Math.max(0, Math.min(state.height - 1, Math.floor(y)));
+                const idx = (cy * state.width + cx) * 4;
+                return { r: data[idx], g: data[idx + 1], b: data[idx + 2], a: data[idx + 3] };
+            }
+
+            // 1. Muestrear el borde de la imagen para identificar el color de fondo
+            const bgSamples = [];
+            for (let t = 0; t <= 20; t++) {
+                const f = t / 20;
+                const sx = Math.floor(minX + f * (maxX - minX));
+                const sy = Math.floor(minY + f * (maxY - minY));
+                bgSamples.push(getPixel(sx, minY));
+                bgSamples.push(getPixel(sx, maxY));
+                bgSamples.push(getPixel(minX, sy));
+                bgSamples.push(getPixel(maxX, sy));
+            }
+
+            const isTransparentPNG = bgSamples.filter(p => p.a < 50).length > (bgSamples.length * 0.35);
+            const threshold = state.edgeThreshold || 32;
+
+            function isObjectPixel(x, y) {
+                const p = getPixel(x, y);
+                if (p.a < 50) return false;
+                if (isTransparentPNG) return p.a > 60;
+
+                let minBgDist = 9999;
+                for (let i = 0; i < bgSamples.length; i++) {
+                    const b = bgSamples[i];
+                    const dist = Math.hypot(p.r - b.r, p.g - b.g, p.b - b.b);
+                    if (dist < minBgDist) minBgDist = dist;
+                }
+
+                const pL = getPixel(x - 1, y);
+                const pR = getPixel(x + 1, y);
+                const pU = getPixel(x, y - 1);
+                const pD = getPixel(x, y + 1);
+                const grad = (Math.abs(pR.r - pL.r) + Math.abs(pR.g - pL.g) + Math.abs(pR.b - pL.b) +
+                              Math.abs(pD.r - pU.r) + Math.abs(pD.g - pU.g) + Math.abs(pD.b - pU.b)) * 0.25;
+
+                return (minBgDist + grad * 0.4) > threshold;
+            }
+
+            function isSolidForeground(x, y) {
+                if (!isObjectPixel(x, y)) return false;
+                let count = 0;
+                if (isObjectPixel(x + 1, y)) count++;
+                if (isObjectPixel(x - 1, y)) count++;
+                if (isObjectPixel(x, y + 1)) count++;
+                if (isObjectPixel(x, y - 1)) count++;
+                return count >= 1;
+            }
+
+            // 2. Escaneo de TODA la altura de la imagen de principio a fin
+            const rawRows = [];
+            let sumR = 0, sumG = 0, sumB = 0, colorCount = 0;
+
+            for (let y = minY; y <= maxY; y++) {
+                let leftX = -1;
+                let rightX = -1;
+
+                for (let x = minX; x <= maxX; x++) {
+                    if (isSolidForeground(x, y)) {
+                        leftX = x;
+                        break;
+                    }
+                }
+                if (leftX !== -1) {
+                    for (let x = maxX; x >= leftX; x--) {
+                        if (isSolidForeground(x, y)) {
+                            rightX = x;
+                            break;
+                        }
+                    }
+                }
+
+                if (leftX !== -1 && rightX !== -1 && (rightX - leftX) >= 3) {
+                    rawRows.push({ y, leftX, rightX, width: rightX - leftX });
+                    if (y % 3 === 0) {
+                        const midX = Math.floor((leftX + rightX) / 2);
+                        const c = getPixel(midX, y);
+                        if (c.a > 100) {
+                            sumR += c.r; sumG += c.g; sumB += c.b;
+                            colorCount++;
+                        }
+                    }
+                }
+            }
+
+            // Si la foto ocupa todo el cuadro sin fondo distinguible, usar todo el marco de la imagen
+            if (rawRows.length < 4) {
+                for (let y = minY + 4; y <= maxY - 4; y += 2) {
+                    rawRows.push({ y, leftX: minX + 4, rightX: maxX - 4, width: (maxX - minX) - 8 });
+                }
+            }
+
+            if (colorCount > 0) {
+                state.detectedClayColor = {
+                    r: Math.round(sumR / colorCount),
+                    g: Math.round(sumG / colorCount),
+                    b: Math.round(sumB / colorCount)
+                };
+            }
+
+            // 3. Eje de simetría robusto basado en las filas más anchas (sanas) de la figura
+            if (!customROI) {
+                const sortedByWidth = [...rawRows].sort((a, b) => b.width - a.width);
+                const topIntactRows = sortedByWidth.slice(0, Math.max(5, Math.floor(sortedByWidth.length * 0.5)));
+                const centers = topIntactRows.map(r => (r.leftX + r.rightX) / 2).sort((a, b) => a - b);
+                state.symmetryAxisX = Math.round(centers[Math.floor(centers.length / 2)]);
+            }
+
+            const cx = state.symmetryAxisX;
+            state.rawDamagedContour = [];
+            state.fractureZones = [];
+            let repairedRowsCount = 0;
+
+            // 4. Construir la silueta original (rawDamagedContour) y la silueta reconstruida (reconstructedRows) a lo largo de TODA la figura
+            const reconstructedRows = rawRows.map((row) => {
+                const rLeft = cx - row.leftX;
+                const rRight = row.rightX - cx;
+                let finalLeftX = row.leftX;
+                let finalRightX = row.rightX;
+                let isCutLeft = false;
+                let isCutRight = false;
+
+                if (state.autoRepairCutout) {
+                    // Si un lado fue cortado/mordido respecto a su lado simétrico opuesto, lo reconstruye en cualquier parte de la altura
+                    if (rLeft - rRight > 14 && rLeft > 15) {
+                        finalRightX = Math.min(maxX, Math.round(cx + rLeft));
+                        isCutRight = true;
+                        repairedRowsCount++;
+                    } else if (rRight - rLeft > 14 && rRight > 15) {
+                        finalLeftX = Math.max(minX, Math.round(cx - rRight));
+                        isCutLeft = true;
+                        repairedRowsCount++;
+                    }
+                }
+
+                return {
+                    y: row.y,
+                    rawLeftX: row.leftX,
+                    rawRightX: row.rightX,
+                    leftX: finalLeftX,
+                    rightX: finalRightX,
+                    isCutLeft,
+                    isCutRight
+                };
+            });
+
+            // Construir polígono denso de la silueta original (línea roja punteada) y de la silueta reconstruida
+            const fullReconstructedPolyline = [];
+
+            // Borde izquierdo de arriba a abajo
+            for (let i = 0; i < reconstructedRows.length; i += 2) {
+                const r = reconstructedRows[i];
+                state.rawDamagedContour.push({ x: r.rawLeftX, y: r.y });
+                fullReconstructedPolyline.push({ x: r.leftX, y: r.y, isCorner: (i === 0) });
+            }
+            const lastR = reconstructedRows[reconstructedRows.length - 1];
+            state.rawDamagedContour.push({ x: lastR.rawLeftX, y: lastR.y });
+            fullReconstructedPolyline.push({ x: lastR.leftX, y: lastR.y, isCorner: true });
+
+            // Borde inferior de izquierda a derecha siguiendo el contorno real inferior
+            const botSteps = 6;
+            for (let s = 1; s < botSteps; s++) {
+                const f = s / botSteps;
+                const bxRaw = Math.round(lastR.rawLeftX + f * (lastR.rawRightX - lastR.rawLeftX));
+                const bxRec = Math.round(lastR.leftX + f * (lastR.rightX - lastR.leftX));
+                state.rawDamagedContour.push({ x: bxRaw, y: lastR.y });
+                fullReconstructedPolyline.push({ x: bxRec, y: lastR.y, isCorner: false });
+            }
+
+            // Borde derecho de abajo hacia arriba
+            state.rawDamagedContour.push({ x: lastR.rawRightX, y: lastR.y });
+            fullReconstructedPolyline.push({ x: lastR.rightX, y: lastR.y, isCorner: true });
+
+            for (let i = reconstructedRows.length - 2; i >= 0; i -= 2) {
+                const r = reconstructedRows[i];
+                state.rawDamagedContour.push({ x: r.rawRightX, y: r.y });
+                fullReconstructedPolyline.push({ x: r.rightX, y: r.y, isCorner: (i === 0) });
+            }
+
+            const firstR = reconstructedRows[0];
+            // Borde superior de derecha a izquierda cerrando la silueta
+            const topSteps = 6;
+            for (let s = 1; s < topSteps; s++) {
+                const f = s / topSteps;
+                const txRaw = Math.round(firstR.rawRightX - f * (firstR.rawRightX - firstR.rawLeftX));
+                const txRec = Math.round(firstR.rightX - f * (firstR.rightX - firstR.leftX));
+                state.rawDamagedContour.push({ x: txRaw, y: firstR.y });
+                fullReconstructedPolyline.push({ x: txRec, y: firstR.y, isCorner: false });
+            }
+
+            // 5. EXTRAER LOS PUNTOS P_i DIRECTAMENTE DE LA POLILÍNEA DE LA SILUETA POR PERÍMETRO UNIFORME
+            // Así todos los puntos quedan 100% clavados sobre la silueta y el Spline no deforma nada
+            function sampleUniformlyAlongContour(poly, targetCount) {
+                if (poly.length <= targetCount) return poly.map(p => ({ ...p }));
+                const cumLen = [0];
+                for (let i = 1; i < poly.length; i++) {
+                    const d = Math.hypot(poly[i].x - poly[i - 1].x, poly[i].y - poly[i - 1].y);
+                    cumLen.push(cumLen[i - 1] + d);
+                }
+                const closeDist = Math.hypot(poly[0].x - poly[poly.length - 1].x, poly[0].y - poly[poly.length - 1].y);
+                const totalPerimeter = cumLen[cumLen.length - 1] + closeDist;
+                const stepLen = totalPerimeter / targetCount;
+
+                const sampled = [];
+                for (let k = 0; k < targetCount; k++) {
+                    const targetDist = k * stepLen;
+                    // Buscar el punto exacto sobre la polilínea de la silueta
+                    let idx = 0;
+                    while (idx < cumLen.length - 1 && cumLen[idx + 1] < targetDist) {
+                        idx++;
+                    }
+                    const p1 = poly[idx];
+                    const p2 = poly[(idx + 1) % poly.length];
+                    const segStart = cumLen[idx];
+                    const segLen = (idx < cumLen.length - 1) ? (cumLen[idx + 1] - segStart) : closeDist;
+                    const frac = segLen > 1e-4 ? Math.min(1, Math.max(0, (targetDist - segStart) / segLen)) : 0;
+
+                    sampled.push({
+                        x: Math.round(p1.x + frac * (p2.x - p1.x)),
+                        y: Math.round(p1.y + frac * (p2.y - p1.y)),
+                        isCorner: !!p1.isCorner && frac < 0.25
+                    });
+                }
+
+                // Asegurar que las 4 esquinas principales estén clavadas exactamente en su coordenada
+                const mainCorners = [
+                    { x: firstR.leftX, y: firstR.y },
+                    { x: lastR.leftX, y: lastR.y },
+                    { x: lastR.rightX, y: lastR.y },
+                    { x: firstR.rightX, y: firstR.y }
+                ];
+                mainCorners.forEach(mc => {
+                    let bestIdx = -1;
+                    let bestDist = Infinity;
+                    sampled.forEach((sp, idx) => {
+                        const d = Math.hypot(sp.x - mc.x, sp.y - mc.y);
+                        if (d < bestDist) {
+                            bestDist = d;
+                            bestIdx = idx;
+                        }
+                    });
+                    if (bestIdx !== -1 && bestDist < stepLen * 0.85) {
+                        sampled[bestIdx] = { x: mc.x, y: mc.y, isCorner: true };
+                    }
+                });
+
+                return sampled;
+            }
+
+            if (state.fullObjectContour) {
+                state.points = sampleUniformlyAlongContour(fullReconstructedPolyline, 28);
+            } else {
+                const rightSidePoly = [];
+                for (let i = 0; i < reconstructedRows.length; i += Math.max(1, Math.floor(reconstructedRows.length / 12))) {
+                    rightSidePoly.push({ x: reconstructedRows[i].rightX, y: reconstructedRows[i].y });
+                }
+                state.points = rightSidePoly;
+            }
+
+            // 6. El Área de Reconstrucción (ROI) tiene exactamente el tamaño de TODA la imagen subida
+            state.roiBox = customROI ? { ...customROI } : {
+                x: Math.round(drawX),
+                y: Math.round(drawY),
+                w: Math.round(drawW),
+                h: Math.round(drawH)
+            };
+
+            state.activeSegmentsCount = Math.min(8, Math.max(1, getTotalSegmentsCount()));
+            updateSegmentSliderBounds();
+            refreshUI();
+
+            if (repairedRowsCount > 4) {
+                showToast(`Área de toda la imagen + parte faltante reconstruida (${state.points.length} puntos sobre la silueta)`);
+            } else {
+                showToast(`Área de toda la imagen seleccionada (${state.points.length} puntos clavados en la silueta)`);
+            }
+        }
+
+        // Función para simetrizar manualmente ambos lados en toda la altura de la imagen si el usuario pulsa "Simetrizar Figura"
+        function mirrorLeftProfileToRight() {
+            if (state.uploadedImage) {
+                state.autoRepairCutout = true;
+                autoDetectUploadedObject();
+                return;
+            }
+            loadKeruPreset();
+        }
+
+        /***********************************************************************
+         * 4. DIBUJO EN CANVAS: PIEZA ARQUEOLÓGICA, GALERÍA MUSEO Y 7 ETAPAS
+         ***********************************************************************/
+        function drawShowcaseBackgroundStep7() {
+            if (state.step !== 7) return;
+            ctx.save();
+
+            // Fondo de vitrina de museo de lujo con iluminación cálida radial y atmósfera andina
+            const radGrad = ctx.createRadialGradient(
+                state.symmetryAxisX, 300, 30,
+                state.symmetryAxisX, 300, 520
+            );
+            radGrad.addColorStop(0, 'rgba(251, 146, 60, 0.28)');
+            radGrad.addColorStop(0.42, 'rgba(124, 45, 18, 0.22)');
+            radGrad.addColorStop(0.75, 'rgba(15, 23, 42, 0.92)');
+            radGrad.addColorStop(1, '#060911');
+            ctx.fillStyle = radGrad;
+            ctx.fillRect(0, 0, state.width, state.height);
+
+            // Haz de luz cenital (reflector de museo)
+            ctx.beginPath();
+            ctx.moveTo(state.symmetryAxisX - 90, 0);
+            ctx.lineTo(state.symmetryAxisX + 90, 0);
+            ctx.lineTo(state.symmetryAxisX + 260, 540);
+            ctx.lineTo(state.symmetryAxisX - 260, 540);
+            ctx.closePath();
+            const beamGrad = ctx.createLinearGradient(0, 0, 0, 540);
+            beamGrad.addColorStop(0, 'rgba(253, 224, 71, 0.16)');
+            beamGrad.addColorStop(0.6, 'rgba(251, 146, 60, 0.06)');
+            beamGrad.addColorStop(1, 'rgba(251, 146, 60, 0)');
+            ctx.fillStyle = beamGrad;
+            ctx.fill();
+
+            // Anillos geométricos solares decorativos detrás de la pieza
+            ctx.strokeStyle = 'rgba(251, 191, 36, 0.14)';
+            ctx.lineWidth = 1.5;
+            ctx.beginPath();
+            ctx.arc(state.symmetryAxisX, 300, 210, 0, Math.PI * 2);
+            ctx.stroke();
+
+            ctx.setLineDash([8, 6]);
+            ctx.strokeStyle = 'rgba(56, 189, 248, 0.15)';
+            ctx.beginPath();
+            ctx.arc(state.symmetryAxisX, 300, 235, 0, Math.PI * 2);
+            ctx.stroke();
+            ctx.setLineDash([]);
+
+            // Pedestal / Base de exhibición arqueológica
+            const pedY = 500;
+            ctx.beginPath();
+            ctx.ellipse(state.symmetryAxisX, pedY + 8, 175, 24, 0, 0, Math.PI * 2);
+            const pedGrad = ctx.createRadialGradient(state.symmetryAxisX, pedY + 4, 20, state.symmetryAxisX, pedY + 8, 175);
+            pedGrad.addColorStop(0, 'rgba(251, 146, 60, 0.38)');
+            pedGrad.addColorStop(0.65, 'rgba(30, 41, 59, 0.85)');
+            pedGrad.addColorStop(1, 'rgba(15, 23, 42, 0)');
+            ctx.fillStyle = pedGrad;
+            ctx.fill();
+
+            ctx.beginPath();
+            ctx.ellipse(state.symmetryAxisX, pedY + 5, 138, 15, 0, 0, Math.PI * 2);
+            ctx.strokeStyle = 'rgba(251, 191, 36, 0.55)';
+            ctx.lineWidth = 1.8;
+            ctx.stroke();
+
+            // Marco dorado de vitrina de exhibición
+            ctx.strokeStyle = 'rgba(245, 158, 11, 0.45)';
+            ctx.lineWidth = 2;
+            ctx.strokeRect(14, 14, state.width - 28, state.height - 28);
+
+            // Etiqueta superior de vitrina
+            ctx.fillStyle = 'rgba(15, 23, 42, 0.9)';
+            ctx.fillRect(state.width - 285, 26, 255, 52);
+            ctx.strokeStyle = 'rgba(251, 191, 36, 0.6)';
+            ctx.strokeRect(state.width - 285, 26, 255, 52);
+            ctx.fillStyle = '#fde047';
+            ctx.font = 'bold 11px Inter, sans-serif';
+            ctx.fillText('✨ PIEZA RECONSTRUIDA AL 100%', state.width - 273, 45);
+            ctx.fillStyle = '#e2e8f0';
+            ctx.font = '10px JetBrains Mono, monospace';
+            ctx.fillText(`Tramos C² cerrados: ${getTotalSegmentsCount()} segmentos`, state.width - 273, 61);
+            ctx.fillText('Modelo: Spline Cúbico Paramétrico', state.width - 273, 73);
+
+            ctx.restore();
+        }
+
+        function drawCartesianGrid() {
+            if (!state.showGrid) return;
+            ctx.save();
+            ctx.strokeStyle = state.step === 7 ? 'rgba(251, 191, 36, 0.06)' : 'rgba(148, 163, 184, 0.08)';
+            ctx.lineWidth = 1;
+
+            for (let x = 0; x <= state.width; x += 50) {
+                ctx.beginPath();
+                ctx.moveTo(x, 0);
+                ctx.lineTo(x, state.height);
+                ctx.stroke();
+                if (x > 0 && x < state.width) {
+                    ctx.fillStyle = 'rgba(148, 163, 184, 0.35)';
+                    ctx.font = '10px JetBrains Mono, monospace';
+                    ctx.fillText(x, x + 3, 12);
+                }
+            }
+
+            for (let y = 0; y <= state.height; y += 50) {
+                ctx.beginPath();
+                ctx.moveTo(0, y);
+                ctx.lineTo(state.width, y);
+                ctx.stroke();
+                if (y > 0 && y < state.height) {
+                    ctx.fillStyle = 'rgba(148, 163, 184, 0.35)';
+                    ctx.font = '10px JetBrains Mono, monospace';
+                    ctx.fillText(y, 4, y - 3);
+                }
+            }
+            ctx.restore();
+        }
+
+        function drawArchaeologicalArtifact() {
+            ctx.save();
+            // En el paso 7 atenuamos los bordes rotos originales para que luzca la figura completa reconstruida
+            ctx.globalAlpha = state.step === 7 ? Math.min(state.bgOpacity, 0.35) : state.bgOpacity;
+
+            if (state.uploadedImage) {
+                const img = state.uploadedImage;
+                const scale = Math.min(state.width / img.width, state.height / img.height) * 0.88;
+                const drawW = img.width * scale;
+                const drawH = img.height * scale;
+                const drawX = (state.width - drawW) / 2;
+                const drawY = (state.height - drawH) / 2;
+
+                ctx.drawImage(img, drawX, drawY, drawW, drawH);
+
+                // Dibujar en rojo punteado el borde cortado/roto detectado a partir del Paso 2 para que en el Paso 1 se vea únicamente la imagen original limpia
+                if (state.rawDamagedContour && state.rawDamagedContour.length > 4 && state.step >= 2 && state.step <= 6) {
+                    ctx.save();
+                    ctx.beginPath();
+                    ctx.moveTo(state.rawDamagedContour[0].x, state.rawDamagedContour[0].y);
+                    for (let i = 1; i < state.rawDamagedContour.length; i++) {
+                        ctx.lineTo(state.rawDamagedContour[i].x, state.rawDamagedContour[i].y);
+                    }
+                    ctx.closePath();
+                    ctx.setLineDash([5, 4]);
+                    ctx.strokeStyle = 'rgba(248, 113, 113, 0.85)';
+                    ctx.lineWidth = 2;
+                    ctx.stroke();
+                    ctx.restore();
+                }
+
+                if (state.step >= 2) {
+                    ctx.fillStyle = 'rgba(15, 23, 42, 0.86)';
+                    ctx.fillRect(16, 48, 285, 56);
+                    ctx.strokeStyle = 'rgba(16, 185, 129, 0.5)';
+                    ctx.strokeRect(16, 48, 285, 56);
+                    ctx.fillStyle = '#6ee7b7';
+                    ctx.font = 'bold 11px Inter, sans-serif';
+                    ctx.fillText('PIEZA CARGADA + REPARACIÓN ACTIVA', 26, 66);
+                    ctx.fillStyle = '#fca5a5';
+                    ctx.font = '10px JetBrains Mono, monospace';
+                    ctx.fillText('--- Línea Roja: Borde cortado/faltante', 26, 82);
+                    ctx.fillStyle = '#fdba74';
+                    ctx.fillText(`─── Spline C²: Reconstrucción (${state.points.length} pts)`, 26, 96);
+                }
+
+                ctx.restore();
+                return;
+            }
+
+            // Sombra en el suelo
+            ctx.beginPath();
+            ctx.ellipse(390, 502, 130, 18, 0, 0, Math.PI * 2);
+            ctx.fillStyle = 'rgba(0, 0, 0, 0.55)';
+            ctx.fill();
+
+            const cx = 390;
+            const leftProfile = [
+                { x: 235, y: 125 },
+                { x: 258, y: 170 },
+                { x: 280, y: 220 },
+                { x: 296, y: 270 },
+                { x: 282, y: 295 },
+                { x: 300, y: 320 },
+                { x: 308, y: 375 },
+                { x: 312, y: 430 },
+                { x: 302, y: 472 },
+                { x: 288, y: 495 }
+            ];
+
+            // Borde derecho fracturado / incompleto
+            const brokenRightEdge = [
+                { x: 432, y: 125 },
+                { x: 422, y: 158 },
+                { x: 444, y: 192 },
+                { x: 416, y: 238 },
+                { x: 436, y: 280 },
+                { x: 414, y: 325 },
+                { x: 430, y: 370 },
+                { x: 425, y: 422 },
+                { x: 455, y: 465 },
+                { x: 492, y: 495 }
+            ];
+
+            // Silueta fantasma de referencia
+            ctx.save();
+            ctx.beginPath();
+            ctx.moveTo(cx, 125);
+            DEFAULT_KERU_HALF_POINTS.forEach(pt => ctx.lineTo(pt.x, pt.y));
+            ctx.lineTo(cx, 495);
+            ctx.closePath();
+            ctx.fillStyle = 'rgba(251, 146, 60, 0.04)';
+            ctx.fill();
+            ctx.setLineDash([4, 4]);
+            ctx.strokeStyle = 'rgba(148, 163, 184, 0.22)';
+            ctx.lineWidth = 1;
+            ctx.stroke();
+            ctx.restore();
+
+            // Cuerpo cerámico conservado
+            ctx.beginPath();
+            ctx.moveTo(leftProfile[0].x, leftProfile[0].y);
+            for (let i = 1; i < leftProfile.length; i++) {
+                ctx.lineTo(leftProfile[i].x, leftProfile[i].y);
+            }
+            for (let i = brokenRightEdge.length - 1; i >= 0; i--) {
+                ctx.lineTo(brokenRightEdge[i].x, brokenRightEdge[i].y);
+            }
+            ctx.closePath();
+
+            const clayGrad = ctx.createLinearGradient(235, 125, 480, 495);
+            clayGrad.addColorStop(0, '#7c2d12');
+            clayGrad.addColorStop(0.35, '#9a3412');
+            clayGrad.addColorStop(0.7, '#6c240c');
+            clayGrad.addColorStop(1, '#431407');
+            ctx.fillStyle = clayGrad;
+            ctx.fill();
+
+            ctx.save();
+            ctx.clip();
+
+            // Franja geométrica Tiwanaku
+            ctx.fillStyle = '#1e1b18';
+            ctx.fillRect(220, 155, 260, 55);
+            ctx.strokeStyle = '#f59e0b';
+            ctx.lineWidth = 2;
+            ctx.beginPath();
+            ctx.moveTo(220, 155); ctx.lineTo(480, 155);
+            ctx.moveTo(220, 210); ctx.lineTo(480, 210);
+            ctx.stroke();
+
+            ctx.strokeStyle = '#fbbf24';
+            ctx.lineWidth = 1.8;
+            for (let xOffset = 248; xOffset < 430; xOffset += 48) {
+                ctx.strokeRect(xOffset, 168, 28, 28);
+                ctx.strokeRect(xOffset + 8, 176, 12, 12);
+            }
+
+            // Anillo central
+            ctx.fillStyle = 'rgba(251, 146, 60, 0.22)';
+            ctx.fillRect(260, 282, 200, 26);
+
+            // Grietas internas
+            ctx.strokeStyle = 'rgba(15, 23, 42, 0.65)';
+            ctx.lineWidth = 1.5;
+            ctx.beginPath();
+            ctx.moveTo(422, 158); ctx.lineTo(395, 175); ctx.lineTo(380, 170);
+            ctx.moveTo(416, 238); ctx.lineTo(385, 252);
+            ctx.moveTo(414, 325); ctx.lineTo(390, 340);
+            ctx.stroke();
+
+            ctx.restore();
+
+            // Contorno sano izquierdo
+            ctx.beginPath();
+            ctx.moveTo(leftProfile[0].x, leftProfile[0].y);
+            leftProfile.forEach(p => ctx.lineTo(p.x, p.y));
+            ctx.strokeStyle = '#fdba74';
+            ctx.lineWidth = 2.5;
+            ctx.stroke();
+
+            // Contorno de fractura irregular derecho
+            ctx.beginPath();
+            ctx.moveTo(brokenRightEdge[0].x, brokenRightEdge[0].y);
+            brokenRightEdge.forEach(p => ctx.lineTo(p.x, p.y));
+            ctx.strokeStyle = '#f87171';
+            ctx.lineWidth = 2;
+            ctx.stroke();
+
+            // Ficha museográfica
+            ctx.fillStyle = 'rgba(15, 23, 42, 0.78)';
+            ctx.fillRect(16, 48, 240, 54);
+            ctx.strokeStyle = 'rgba(234, 88, 12, 0.45)';
+            ctx.strokeRect(16, 48, 240, 54);
+            ctx.fillStyle = '#fb923c';
+            ctx.font = 'bold 11px Inter, sans-serif';
+            ctx.fillText('PIEZA: KERU CEREMONIAL TIWANAKU', 26, 66);
+            ctx.fillStyle = '#94a3b8';
+            ctx.font = '10px JetBrains Mono, monospace';
+            ctx.fillText('Modo: Contorno Completo (360°)', 26, 82);
+            ctx.fillText(`Nodos Pᵢ: ${state.points.length} | Tramos: ${getTotalSegmentsCount()}`, 26, 95);
+
+            ctx.restore();
+        }
+
+        function drawSymmetryAxis() {
+            if (!state.showSymmetry || state.step === 1) return;
+            ctx.save();
+            ctx.setLineDash([6, 6]);
+            ctx.strokeStyle = 'rgba(34, 211, 238, 0.55)';
+            ctx.lineWidth = 1.5;
+            ctx.beginPath();
+            ctx.moveTo(state.symmetryAxisX, 60);
+            ctx.lineTo(state.symmetryAxisX, state.height - 40);
+            ctx.stroke();
+
+            ctx.fillStyle = 'rgba(8, 51, 68, 0.9)';
+            ctx.strokeStyle = 'rgba(34, 211, 238, 0.6)';
+            ctx.lineWidth = 1;
+            ctx.fillRect(state.symmetryAxisX - 58, 65, 116, 20);
+            ctx.strokeRect(state.symmetryAxisX - 58, 65, 116, 20);
+            ctx.fillStyle = '#67e8f9';
+            ctx.font = '10px JetBrains Mono, monospace';
+            ctx.textAlign = 'center';
+            ctx.fillText(`Eje X = ${Math.round(state.symmetryAxisX)}`, state.symmetryAxisX, 79);
+            ctx.restore();
+        }
+
+        function drawROIZone() {
+            if (state.step !== 2 && !state.showROI && !state.selectingROIMode) return;
+            const { x, y, w, h } = state.roiBox;
+            ctx.save();
+            ctx.fillStyle = 'rgba(245, 158, 11, 0.09)';
+            ctx.fillRect(x, y, w, h);
+
+            ctx.setLineDash([8, 5]);
+            ctx.strokeStyle = '#f59e0b';
+            ctx.lineWidth = 2;
+            ctx.strokeRect(x, y, w, h);
+
+            ctx.setLineDash([]);
+            const corners = [
+                [x, y], [x + w, y],
+                [x, y + h], [x + w, y + h]
+            ];
+            ctx.fillStyle = '#fbbf24';
+            corners.forEach(([cx, cy]) => {
+                ctx.fillRect(cx - 4, cy - 4, 8, 8);
+            });
+
+            ctx.fillStyle = 'rgba(120, 53, 15, 0.92)';
+            ctx.fillRect(x, y - 24, 235, 22);
+            ctx.fillStyle = '#fde68a';
+            ctx.font = 'bold 11px Inter, sans-serif';
+            ctx.fillText('ZONA DE LA FIGURA COMPLETA (ROI)', x + 8, y - 9);
+            ctx.restore();
+        }
+
+        function sampleSplineCurvePoints(splineData, maxSegmentsToDraw, progressFraction = 1.0) {
+            if (!splineData) return [];
+            const { mode, tParams, splineX, splineY } = splineData;
+            const totalSegs = tParams.length - 1;
+            const segLimit = Math.min(totalSegs, maxSegmentsToDraw);
+            const curvePts = [];
+
+            const exactPos = segLimit * progressFraction;
+            const fullSegments = Math.floor(exactPos);
+            const partialSegmentFraction = exactPos - fullSegments;
+
+            const samplesPerSeg = 30;
+
+            for (let i = 0; i < fullSegments; i++) {
+                const t0 = tParams[i];
+                const t1 = tParams[i + 1];
+                for (let s = 0; s <= samplesPerSeg; s++) {
+                    if (i > 0 && s === 0) continue;
+                    const tVal = t0 + (t1 - t0) * (s / samplesPerSeg);
+                    if (mode === 'parametric') {
+                        curvePts.push({
+                            x: evaluateSplineSegment(splineX, i, tVal),
+                            y: evaluateSplineSegment(splineY, i, tVal),
+                            segIndex: i
+                        });
+                    } else {
+                        curvePts.push({
+                            x: evaluateSplineSegment(splineX, i, tVal),
+                            y: tVal,
+                            segIndex: i
+                        });
+                    }
+                }
+            }
+
+            if (fullSegments < segLimit && partialSegmentFraction > 0.001) {
+                const i = fullSegments;
+                const t0 = tParams[i];
+                const t1 = tParams[i + 1];
+                const subSamples = Math.max(2, Math.ceil(samplesPerSeg * partialSegmentFraction));
+                for (let s = 0; s <= subSamples; s++) {
+                    if (i > 0 && s === 0) continue;
+                    const frac = (s / subSamples) * partialSegmentFraction;
+                    const tVal = t0 + (t1 - t0) * frac;
+                    if (mode === 'parametric') {
+                        curvePts.push({
+                            x: evaluateSplineSegment(splineX, i, tVal),
+                            y: evaluateSplineSegment(splineY, i, tVal),
+                            segIndex: i
+                        });
+                    } else {
+                        curvePts.push({
+                            x: evaluateSplineSegment(splineX, i, tVal),
+                            y: tVal,
+                            segIndex: i
+                        });
+                    }
+                }
+            }
+
+            return curvePts;
+        }
+
+        function drawReconstructedSurface(splineData) {
+            if (!splineData || state.points.length < 2) return;
+            if (state.step < 6) return;
+
+            const totalSegs = splineData.tParams.length - 1;
+            const curvePts = sampleSplineCurvePoints(splineData, totalSegs, state.splineProgress);
+            if (curvePts.length < 2) return;
+
+            ctx.save();
+
+            if (state.splitComparison) {
+                ctx.beginPath();
+                ctx.rect(state.symmetryAxisX, 0, state.width - state.symmetryAxisX, state.height);
+                ctx.clip();
+            }
+
+            ctx.beginPath();
+            if (splineData.closed) {
+                // La curva envuelve TODA la figura completa
+                ctx.moveTo(curvePts[0].x, curvePts[0].y);
+                for (let i = 1; i < curvePts.length; i++) {
+                    ctx.lineTo(curvePts[i].x, curvePts[i].y);
+                }
+                ctx.closePath();
+            } else {
+                const firstPt = curvePts[0];
+                const lastPt = curvePts[curvePts.length - 1];
+                ctx.moveTo(state.symmetryAxisX, firstPt.y);
+                curvePts.forEach(pt => ctx.lineTo(pt.x, pt.y));
+                ctx.lineTo(state.symmetryAxisX, lastPt.y);
+                ctx.closePath();
+            }
+
+            if (state.step === 6) {
+                // Malla holográfica sobre toda la pieza
+                const holoGrad = ctx.createLinearGradient(220, 120, 560, 500);
+                holoGrad.addColorStop(0, 'rgba(34, 211, 238, 0.32)');
+                holoGrad.addColorStop(0.5, 'rgba(249, 115, 22, 0.38)');
+                holoGrad.addColorStop(1, 'rgba(16, 185, 129, 0.35)');
+                ctx.fillStyle = holoGrad;
+                ctx.fill();
+
+                ctx.save();
+                ctx.clip();
+                ctx.strokeStyle = 'rgba(34, 211, 238, 0.25)';
+                ctx.lineWidth = 1;
+                for (let y = 80; y < state.height - 40; y += 14) {
+                    ctx.beginPath();
+                    ctx.moveTo(0, y);
+                    ctx.lineTo(state.width, y);
+                    ctx.stroke();
+                }
+                for (let x = 150; x < state.width - 150; x += 22) {
+                    ctx.beginPath();
+                    ctx.moveTo(x, 0);
+                    ctx.lineTo(x, state.height);
+                    ctx.stroke();
+                }
+                ctx.restore();
+            } else if (state.step === 7) {
+                // Paso 7: Figura completa renderizada con volumen 3D cerámico y acabado de museo
+                const { r, g, b } = state.detectedClayColor;
+
+                ctx.save();
+                ctx.clip();
+
+                // Si el usuario subió una foto con un trozo cortado, rellenamos tanto con la foto sana como con su proyección simétrica espejada para tapar el hueco con la textura real de la pieza
+                if (state.uploadedImage) {
+                    const img = state.uploadedImage;
+                    const scale = Math.min(state.width / img.width, state.height / img.height) * 0.88;
+                    const drawW = img.width * scale;
+                    const drawH = img.height * scale;
+                    const drawX = (state.width - drawW) / 2;
+                    const drawY = (state.height - drawH) / 2;
+
+                    // 1. Capa base de color cerámico sólido para que ningún hueco quede vacío
+                    ctx.fillStyle = `rgb(${r}, ${g}, ${b})`;
+                    ctx.fillRect(0, 0, state.width, state.height);
+
+                    // 2. Proyección simétrica en espejo alrededor de state.symmetryAxisX para rellenar el pedazo cortado con la propia textura de la pieza
+                    ctx.save();
+                    ctx.translate(state.symmetryAxisX * 2, 0);
+                    ctx.scale(-1, 1);
+                    ctx.globalAlpha = 0.92;
+                    ctx.drawImage(img, drawX, drawY, drawW, drawH);
+                    ctx.restore();
+
+                    // 3. Superponer la imagen original encima
+                    ctx.globalAlpha = 0.72;
+                    ctx.drawImage(img, drawX, drawY, drawW, drawH);
+                }
+
+                // Gradiente volumétrico 3D cilindrico a lo ancho de toda la figura
+                const volGrad = ctx.createLinearGradient(state.symmetryAxisX - 165, 0, state.symmetryAxisX + 165, 0);
+                volGrad.addColorStop(0, `rgba(${Math.max(0, r - 55)}, ${Math.max(0, g - 30)}, ${Math.max(0, b - 18)}, ${state.uploadedImage ? 0.50 : 0.96})`);
+                volGrad.addColorStop(0.28, `rgba(${Math.min(255, r + 35)}, ${Math.min(255, g + 22)}, ${Math.min(255, b + 12)}, ${state.uploadedImage ? 0.28 : 0.96})`);
+                volGrad.addColorStop(0.55, `rgba(${r}, ${g}, ${b}, ${state.uploadedImage ? 0.38 : 0.96})`);
+                volGrad.addColorStop(0.85, `rgba(${Math.max(0, r - 35)}, ${Math.max(0, g - 20)}, ${Math.max(0, b - 12)}, ${state.uploadedImage ? 0.55 : 0.96})`);
+                volGrad.addColorStop(1, `rgba(${Math.max(0, r - 70)}, ${Math.max(0, g - 40)}, ${Math.max(0, b - 22)}, ${state.uploadedImage ? 0.68 : 0.98})`);
+                ctx.fillStyle = volGrad;
+                ctx.fillRect(0, 0, state.width, state.height);
+
+                // Brillo especular vertical (efecto cerámica pulida)
+                const specGrad = ctx.createLinearGradient(state.symmetryAxisX - 95, 0, state.symmetryAxisX - 35, 0);
+                specGrad.addColorStop(0, 'rgba(255, 255, 255, 0)');
+                specGrad.addColorStop(0.5, 'rgba(254, 243, 199, 0.22)');
+                specGrad.addColorStop(1, 'rgba(255, 255, 255, 0)');
+                ctx.fillStyle = specGrad;
+                ctx.fillRect(state.symmetryAxisX - 105, 80, 80, 440);
+
+                // Iconografía Tiwanaku completa de lado a lado para la pieza predeterminada
+                if (!state.uploadedImage) {
+                    ctx.fillStyle = 'rgba(24, 20, 17, 0.88)';
+                    ctx.fillRect(state.symmetryAxisX - 180, 155, 360, 55);
+
+                    ctx.strokeStyle = '#f59e0b';
+                    ctx.lineWidth = 2.2;
+                    ctx.beginPath();
+                    ctx.moveTo(state.symmetryAxisX - 180, 155); ctx.lineTo(state.symmetryAxisX + 180, 155);
+                    ctx.moveTo(state.symmetryAxisX - 180, 210); ctx.lineTo(state.symmetryAxisX + 180, 210);
+                    ctx.stroke();
+
+                    ctx.strokeStyle = '#fde047';
+                    ctx.lineWidth = 1.8;
+                    for (let xOffset = state.symmetryAxisX - 142; xOffset <= state.symmetryAxisX + 120; xOffset += 48) {
+                        ctx.strokeRect(xOffset, 168, 28, 28);
+                        ctx.strokeRect(xOffset + 8, 176, 12, 12);
+                    }
+
+                    // Anillo central en relieve completo
+                    const torusGrad = ctx.createLinearGradient(0, 280, 0, 310);
+                    torusGrad.addColorStop(0, 'rgba(253, 186, 116, 0.35)');
+                    torusGrad.addColorStop(0.5, 'rgba(251, 146, 60, 0.5)');
+                    torusGrad.addColorStop(1, 'rgba(67, 20, 7, 0.6)');
+                    ctx.fillStyle = torusGrad;
+                    ctx.fillRect(state.symmetryAxisX - 160, 282, 320, 26);
+                }
+
+                ctx.restore();
+            }
+
+            ctx.restore();
+        }
+
+        function drawSplineCurve(splineData) {
+            if (!splineData || state.points.length < 2) return;
+            if (state.step < 4) return;
+
+            const totalSegments = splineData.tParams.length - 1;
+            const maxSegs = (state.step === 4) ? Math.min(state.activeSegmentsCount, totalSegments) : totalSegments;
+
+            const curvePts = sampleSplineCurvePoints(splineData, maxSegs, state.splineProgress);
+            if (curvePts.length < 2) return;
+
+            ctx.save();
+
+            // Resplandor exterior
+            ctx.beginPath();
+            ctx.moveTo(curvePts[0].x, curvePts[0].y);
+            for (let i = 1; i < curvePts.length; i++) {
+                ctx.lineTo(curvePts[i].x, curvePts[i].y);
+            }
+            ctx.strokeStyle = state.step === 7 ? 'rgba(250, 204, 21, 0.45)' : 'rgba(249, 115, 22, 0.35)';
+            ctx.lineWidth = state.step === 7 ? 11 : 9;
+            ctx.lineCap = 'round';
+            ctx.lineJoin = 'round';
+            ctx.stroke();
+
+            // Trazo por tramos con paleta multicolor en pasos 4 y 5 para evidenciar TODOS los segmentos
+            const palette = ['#fb923c', '#38bdf8', '#34d399', '#a78bfa', '#f472b6', '#facc15', '#2dd4bf', '#f87171'];
+            let currentSeg = curvePts[0].segIndex;
+            ctx.beginPath();
+            ctx.moveTo(curvePts[0].x, curvePts[0].y);
+
+            for (let i = 1; i < curvePts.length; i++) {
+                const pt = curvePts[i];
+                if (pt.segIndex !== currentSeg && (state.step === 4 || state.step === 5)) {
+                    ctx.strokeStyle = palette[currentSeg % palette.length];
+                    ctx.lineWidth = 3.5;
+                    ctx.stroke();
+                    ctx.beginPath();
+                    ctx.moveTo(curvePts[i - 1].x, curvePts[i - 1].y);
+                    currentSeg = pt.segIndex;
+                }
+                ctx.lineTo(pt.x, pt.y);
+            }
+            ctx.strokeStyle = (state.step === 4 || state.step === 5)
+                ? palette[currentSeg % palette.length]
+                : (state.step === 7 ? '#fde047' : '#fb923c');
+            ctx.lineWidth = state.step === 7 ? 3 : 3.5;
+            ctx.stroke();
+
+            ctx.restore();
+        }
+
+        function drawControlPoints(splineData) {
+            if (state.step < 3) return;
+            const pts = splineData ? splineData.pointsUsed : state.points;
+            const visibleCount = Math.ceil(pts.length * state.pointRevealProgress);
+
+            ctx.save();
+
+            if (state.step === 3 || state.step === 4) {
+                ctx.beginPath();
+                ctx.setLineDash([3, 4]);
+                for (let i = 0; i < visibleCount; i++) {
+                    if (i === 0) ctx.moveTo(pts[i].x, pts[i].y);
+                    else ctx.lineTo(pts[i].x, pts[i].y);
+                }
+                if (state.fullObjectContour && visibleCount === pts.length && pts.length >= 3) {
+                    ctx.lineTo(pts[0].x, pts[0].y);
+                }
+                ctx.strokeStyle = 'rgba(148, 163, 184, 0.35)';
+                ctx.lineWidth = 1.2;
+                ctx.stroke();
+                ctx.setLineDash([]);
+            }
+
+            for (let i = 0; i < visibleCount; i++) {
+                const p = pts[i];
+                const isHoveredOrDragged = (i === state.draggingPointIdx);
+                const isCornerNode = !!p.isCorner;
+
+                ctx.beginPath();
+                ctx.arc(p.x, p.y, isHoveredOrDragged ? 11 : (state.step === 7 ? 5.5 : (isCornerNode ? 8.5 : 7)), 0, Math.PI * 2);
+                ctx.fillStyle = isHoveredOrDragged
+                    ? 'rgba(56, 189, 248, 0.4)'
+                    : (isCornerNode ? 'rgba(52, 211, 153, 0.35)' : 'rgba(249, 115, 22, 0.25)');
+                ctx.fill();
+
+                if (isCornerNode && state.step < 7) {
+                    // Dibujar marcador romboidal/cuadrado en las esquinas detectadas para distinguirlas visualmente
+                    ctx.save();
+                    ctx.translate(p.x, p.y);
+                    ctx.rotate(Math.PI / 4);
+                    ctx.fillStyle = isHoveredOrDragged ? '#38bdf8' : '#10b981';
+                    ctx.strokeStyle = '#ffffff';
+                    ctx.lineWidth = 1.6;
+                    ctx.fillRect(-4.5, -4.5, 9, 9);
+                    ctx.strokeRect(-4.5, -4.5, 9, 9);
+                    ctx.restore();
+                } else {
+                    ctx.beginPath();
+                    ctx.arc(p.x, p.y, state.step === 7 ? 3.2 : 4.5, 0, Math.PI * 2);
+                    ctx.fillStyle = isHoveredOrDragged ? '#38bdf8' : (state.step === 7 ? '#fde047' : '#f97316');
+                    ctx.fill();
+                    ctx.lineWidth = 1.6;
+                    ctx.strokeStyle = '#ffffff';
+                    ctx.stroke();
+                }
+
+                if (state.step <= 6) {
+                    const label = `P${i}(${Math.round(p.x)},${Math.round(p.y)})`;
+                    ctx.font = '600 10px JetBrains Mono, monospace';
+                    const textW = ctx.measureText(label).width;
+                    const offsetLeft = p.x < state.symmetryAxisX;
+                    const boxX = offsetLeft ? (p.x - textW - 12) : (p.x + 10);
+                    const boxY = p.y - 8;
+
+                    ctx.fillStyle = 'rgba(15, 23, 42, 0.85)';
+                    ctx.fillRect(boxX - 3, boxY - 10, textW + 6, 14);
+                    ctx.fillStyle = '#fde68a';
+                    ctx.fillText(label, boxX, boxY);
+                }
+            }
+
+            ctx.restore();
+        }
+
+        function drawSplitComparisonOverlay() {
+            if (!state.splitComparison) return;
+            ctx.save();
+            ctx.fillStyle = 'rgba(15, 23, 42, 0.85)';
+            ctx.fillRect(20, state.height - 76, 175, 26);
+            ctx.strokeStyle = '#f87171';
+            ctx.strokeRect(20, state.height - 76, 175, 26);
+            ctx.fillStyle = '#fca5a5';
+            ctx.font = 'bold 11px Inter, sans-serif';
+            ctx.fillText('ANTES: PIEZA ORIGINAL', 32, state.height - 59);
+
+            ctx.fillStyle = 'rgba(15, 23, 42, 0.85)';
+            ctx.fillRect(state.width - 235, state.height - 76, 215, 26);
+            ctx.strokeStyle = '#34d399';
+            ctx.strokeRect(state.width - 235, state.height - 76, 215, 26);
+            ctx.fillStyle = '#6ee7b7';
+            ctx.font = 'bold 11px Inter, sans-serif';
+            ctx.fillText('DESPUÉS: SPLINE CÚBICO C²', state.width - 222, state.height - 59);
+            ctx.restore();
+        }
+
+        function renderCanvas() {
+            ctx.clearRect(0, 0, state.width, state.height);
+
+            // Fondo especial llamativo de vitrina cuando se llega al Paso 7 (Resultado Final)
+            drawShowcaseBackgroundStep7();
+            drawCartesianGrid();
+            drawArchaeologicalArtifact();
+            drawSymmetryAxis();
+            drawROIZone();
+
+            const splineData = computeCurrentSplines(state.points, state.mode, state.fullObjectContour);
+
+            if (state.fillPolygon) {
+                drawReconstructedSurface(splineData);
+            }
+            drawSplineCurve(splineData);
+            drawControlPoints(splineData);
+            drawSplitComparisonOverlay();
+        }
+
+        /***********************************************************************
+         * 5. ACTUALIZACIÓN DE INTERFAZ: TABLA DE PUNTOS Y ECUACIONES CÚBICAS
+         ***********************************************************************/
+        const STEP_INFO = {
+            1: {
+                badge: 'PASO 1: PIEZA ORIGINAL',
+                desc: 'Registro visual de la pieza arqueológica identificando su morfología y zonas deterioradas.'
+            },
+            2: {
+                badge: 'PASO 2: ZONA SELECCIONADA',
+                desc: 'Enmarcado integral de toda la figura arqueológica para extraer su contorno completo.'
+            },
+            3: {
+                badge: 'PASO 3: PUNTOS DE CONTROL Pᵢ = (Xᵢ, Yᵢ)',
+                desc: 'Nodos distribuidos alrededor de toda la pieza (izquierda, base, derecha y boca).'
+            },
+            4: {
+                badge: 'PASO 4: PRIMEROS SEGMENTOS',
+                desc: 'Construcción progresiva de los primeros tramos cúbicos alrededor de la figura.'
+            },
+            5: {
+                badge: 'PASO 5: UNIÓN DE SEGMENTOS (SPLINE COMPLETO)',
+                desc: 'Ciclo cerrado de todos los segmentos con continuidad C⁰, C¹ y C² en toda la pieza.'
+            },
+            6: {
+                badge: 'PASO 6: RECONSTRUCCIÓN DIGITAL',
+                desc: 'Malla matemática generada por el Spline Cúbico cubriendo la totalidad de la figura.'
+            },
+            7: {
+                badge: 'PASO 7: RESULTADO FINAL (VITRINA MUSEOGRÁFICA)',
+                desc: 'Presentación final de la pieza completa restaurada con acabado volumétrico y fondo de exhibición.'
+            }
+        };
+
+        function formatCoef(num) {
+            const val = Number(num);
+            if (Math.abs(val) < 1e-4) return '+ 0';
+            const sign = val >= 0 ? '+ ' : '- ';
+            return sign + Math.abs(val).toFixed(2);
+        }
+
+        function refreshUI() {
+            const info = STEP_INFO[state.step];
+            document.getElementById('currentStepBadge').textContent = info.badge;
+            document.getElementById('stepDescription').textContent = info.desc;
+
+            document.querySelectorAll('.step-btn').forEach(btn => {
+                const s = parseInt(btn.getAttribute('data-step'), 10);
+                btn.classList.toggle('active', s === state.step);
+            });
+
+            const nPts = state.points.length;
+            const nSegs = getTotalSegmentsCount();
+            document.getElementById('hudPointCount').textContent = nPts;
+            document.getElementById('hudSegmentCount').textContent = nSegs;
+
+            const badgeStatus = document.getElementById('badgePointStatus');
+            badgeStatus.textContent = state.fullObjectContour
+                ? `Figura Completa (${nPts} pts / ${nSegs} tramos)`
+                : `Perfil Lateral (${nPts} pts / ${nSegs} tramos)`;
+            badgeStatus.className = 'px-2 py-0.5 rounded text-[11px] font-mono bg-emerald-500/20 text-emerald-300 border border-emerald-500/30';
+
+            const splineData = computeCurrentSplines(state.points, state.mode, state.fullObjectContour);
+            const tbody = document.getElementById('pointsTableBody');
+            tbody.innerHTML = '';
+
+            const displayPts = splineData ? splineData.pointsUsed : state.points;
+            displayPts.forEach((pt, idx) => {
+                const tr = document.createElement('tr');
+                tr.className = 'hover:bg-slate-800/50 transition-colors';
+                const tValNum = (splineData && splineData.tParams && splineData.tParams[idx] !== undefined)
+                    ? Math.round(splineData.tParams[idx])
+                    : idx;
+                const tLabel = state.mode === 'parametric' ? `t${idx} = ${tValNum}` : `y${idx} = ${Math.round(pt.y)}`;
+                tr.innerHTML = `
+                    <td class="py-1.5 px-3 font-semibold text-orange-400">P<sub>${idx}</sub></td>
+                    <td class="py-1.5 px-3 text-slate-400">${tLabel}</td>
+                    <td class="py-1.5 px-3 text-slate-200">${Math.round(pt.x)}</td>
+                    <td class="py-1.5 px-3 text-slate-200">${Math.round(pt.y)}</td>
+                    <td class="py-1.5 px-3 text-right">
+                        <button data-del="${idx}" class="text-slate-500 hover:text-rose-400 transition-colors" title="Eliminar punto">
+                            <i class="fa-solid fa-xmark"></i>
+                        </button>
+                    </td>
+                `;
+                tbody.appendChild(tr);
+            });
+
+            tbody.querySelectorAll('button[data-del]').forEach(btn => {
+                btn.addEventListener('click', () => {
+                    const idx = parseInt(btn.getAttribute('data-del'), 10);
+                    if (state.points.length > 3) {
+                        state.points.splice(idx, 1);
+                        updateSegmentSliderBounds();
+                        refreshUI();
+                    }
+                });
+            });
+
+            const eqContainer = document.getElementById('equationsContainer');
+            eqContainer.innerHTML = '';
+
+            if (splineData && nSegs >= 1) {
+                const { splineX, splineY, tParams, closed } = splineData;
+                const totalEqs = tParams.length - 1;
+                for (let i = 0; i < totalEqs; i++) {
+                    const card = document.createElement('div');
+                    const isHighlighted = (state.step === 4 && i < state.activeSegmentsCount) || state.step >= 5;
+                    card.className = `p-2.5 rounded-lg border transition-all ${
+                        isHighlighted
+                            ? 'bg-slate-900/90 border-slate-700 text-slate-200'
+                            : 'bg-slate-950/40 border-slate-800/50 text-slate-500'
+                    }`;
+
+                    const nextNodeIdx = (closed && i === totalEqs - 1) ? 0 : (i + 1);
+
+                    if (state.mode === 'parametric') {
+                        const tStart = Math.round(tParams[i]);
+                        const tEnd = Math.round(tParams[i + 1]);
+                        const dtStr = `(t - ${tStart})`;
+                        const eqX = `X<sub>${i}</sub>(t) = ${ splineX.a[i].toFixed(1) } ${formatCoef(splineX.b[i])}${dtStr} ${formatCoef(splineX.c[i])}${dtStr}² ${formatCoef(splineX.d[i])}${dtStr}³`;
+                        const eqY = `Y<sub>${i}</sub>(t) = ${ splineY.a[i].toFixed(1) } ${formatCoef(splineY.b[i])}${dtStr} ${formatCoef(splineY.c[i])}${dtStr}² ${formatCoef(splineY.d[i])}${dtStr}³`;
+                        card.innerHTML = `
+                            <div class="flex items-center justify-between text-[11px] mb-1">
+                                <span class="font-bold text-orange-400">Tramo S<sub>${i}</sub>: [P<sub>${i}</sub> → P<sub>${nextNodeIdx}</sub>]</span>
+                                <span class="text-slate-400">t ∈ [${tStart}, ${tEnd}]</span>
+                            </div>
+                            <div class="text-[11px] text-cyan-300 truncate">${eqX}</div>
+                            <div class="text-[11px] text-emerald-300 truncate">${eqY}</div>
+                        `;
+                    } else {
+                        const dyStr = `(y - ${Math.round(tParams[i])})`;
+                        const eqS = `S<sub>${i}</sub>(y) = ${ splineX.a[i].toFixed(1) } ${formatCoef(splineX.b[i])}${dyStr} ${formatCoef(splineX.c[i])}${dyStr}² ${formatCoef(splineX.d[i])}${dyStr}³`;
+                        card.innerHTML = `
+                            <div class="flex items-center justify-between text-[11px] mb-1">
+                                <span class="font-bold text-amber-400">Tramo Explícito S<sub>${i}</sub>(y)</span>
+                                <span class="text-slate-400">y ∈ [${Math.round(tParams[i])}, ${Math.round(tParams[i + 1])}]</span>
+                            </div>
+                            <div class="text-[11px] text-cyan-300 truncate">${eqS}</div>
+                        `;
+                    }
+                    eqContainer.appendChild(card);
+                }
+            }
+
+            renderCanvas();
+        }
+
+        function updateSegmentSliderBounds() {
+            const slider = document.getElementById('sliderSegments');
+            const maxSegs = Math.max(1, getTotalSegmentsCount());
+            slider.max = maxSegs;
+            if (state.activeSegmentsCount > maxSegs) {
+                state.activeSegmentsCount = maxSegs;
+            }
+            slider.value = state.activeSegmentsCount;
+            document.getElementById('lblActiveSegments').textContent = `${state.activeSegmentsCount} de ${maxSegs} tramos`;
+        }
+
+        /***********************************************************************
+         * 6. ANIMACIÓN PROGRESIVA AUTOMÁTICA (1 -> 7)
+         ***********************************************************************/
+        function stopAnimation() {
+            if (state.animFrameId) {
+                cancelAnimationFrame(state.animFrameId);
+                state.animFrameId = null;
+            }
+            state.animating = false;
+            state.splineProgress = 1.0;
+            state.pointRevealProgress = 1.0;
+            document.getElementById('playIcon').className = 'fa-solid fa-play';
+            document.getElementById('playText').textContent = 'Animación Progresiva (1 → 7)';
+        }
+
+        function startProgressiveAnimation() {
+            if (state.animating) {
+                stopAnimation();
+                refreshUI();
+                return;
+            }
+
+            state.animating = true;
+            document.getElementById('playIcon').className = 'fa-solid fa-stop';
+            document.getElementById('playText').textContent = 'Detener Animación';
+
+            const startTime = performance.now();
+            const totalDuration = 14000; // 14 segundos recorriendo los 7 pasos
+
+            function tick(now) {
+                if (!state.animating) return;
+                const elapsed = now - startTime;
+                const t = Math.min(1, elapsed / totalDuration);
+
+                if (t < 0.10) {
+                    state.step = 1;
+                } else if (t < 0.22) {
+                    state.step = 2;
+                } else if (t < 0.38) {
+                    state.step = 3;
+                    state.pointRevealProgress = (t - 0.22) / 0.16;
+                } else if (t < 0.54) {
+                    state.step = 4;
+                    state.pointRevealProgress = 1.0;
+                    state.splineProgress = (t - 0.38) / 0.16;
+                } else if (t < 0.74) {
+                    state.step = 5;
+                    state.splineProgress = (t - 0.54) / 0.20;
+                } else if (t < 0.88) {
+                    state.step = 6;
+                    state.splineProgress = 1.0;
+                } else {
+                    state.step = 7;
+                    state.splineProgress = 1.0;
+                }
+
+                refreshUI();
+
+                if (t < 1) {
+                    state.animFrameId = requestAnimationFrame(tick);
+                } else {
+                    stopAnimation();
+                    refreshUI();
+                }
+            }
+
+            state.animFrameId = requestAnimationFrame(tick);
+        }
+
+        /***********************************************************************
+         * 7. EVENTOS DE INTERACCIÓN (MOUSE, TOUCH Y CONTROLES)
+         ***********************************************************************/
+        function getCanvasMousePos(evt) {
+            const rect = canvas.getBoundingClientRect();
+            const scaleX = state.width / rect.width;
+            const scaleY = state.height / rect.height;
+            const clientX = evt.touches ? evt.touches[0].clientX : evt.clientX;
+            const clientY = evt.touches ? evt.touches[0].clientY : evt.clientY;
+            return {
+                x: (clientX - rect.left) * scaleX,
+                y: (clientY - rect.top) * scaleY
+            };
+        }
+
+        canvas.addEventListener('mousedown', (e) => {
+            if (e.button === 2) return;
+            const pos = getCanvasMousePos(e);
+
+            if (state.selectingROIMode) {
+                state.isDrawingROI = true;
+                state.roiStartPos = { x: pos.x, y: pos.y };
+                state.roiBox = { x: pos.x, y: pos.y, w: 10, h: 10 };
+                state.showROI = true;
+                renderCanvas();
+                return;
+            }
+
+            const hitIdx = state.points.findIndex(p => Math.hypot(p.x - pos.x, p.y - pos.y) < 12);
+            if (hitIdx !== -1) {
+                state.draggingPointIdx = hitIdx;
+                return;
+            }
+
+            if (state.showSymmetry && Math.abs(pos.x - state.symmetryAxisX) < 10) {
+                state.draggingSymmetry = true;
+                return;
+            }
+
+            // Insertar el nuevo punto en el tramo más cercano del contorno para no cruzar líneas
+            if (state.fullObjectContour && state.points.length >= 3) {
+                let bestInsertIdx = state.points.length;
+                let minDist = Infinity;
+                for (let i = 0; i < state.points.length; i++) {
+                    const p1 = state.points[i];
+                    const p2 = state.points[(i + 1) % state.points.length];
+                    const midX = (p1.x + p2.x) / 2;
+                    const midY = (p1.y + p2.y) / 2;
+                    const d = Math.hypot(pos.x - midX, pos.y - midY);
+                    if (d < minDist) {
+                        minDist = d;
+                        bestInsertIdx = i + 1;
+                    }
+                }
+                state.points.splice(bestInsertIdx, 0, { x: Math.round(pos.x), y: Math.round(pos.y) });
+            } else {
+                state.points.push({ x: Math.round(pos.x), y: Math.round(pos.y) });
+            }
+
+            if (state.step < 3) setStep(3);
+            updateSegmentSliderBounds();
+            refreshUI();
+        });
+
+        window.addEventListener('mousemove', (e) => {
+            const rect = canvas.getBoundingClientRect();
+            if (e.clientX >= rect.left && e.clientX <= rect.right && e.clientY >= rect.top && e.clientY <= rect.bottom) {
+                const pos = getCanvasMousePos(e);
+                document.getElementById('hudCoords').textContent = `(${Math.round(pos.x)}, ${Math.round(pos.y)})`;
+
+                if (state.isDrawingROI) {
+                    const x = Math.min(state.roiStartPos.x, pos.x);
+                    const y = Math.min(state.roiStartPos.y, pos.y);
+                    const w = Math.max(30, Math.abs(pos.x - state.roiStartPos.x));
+                    const h = Math.max(30, Math.abs(pos.y - state.roiStartPos.y));
+                    state.roiBox = { x: Math.round(x), y: Math.round(y), w: Math.round(w), h: Math.round(h) };
+                    renderCanvas();
+                } else if (state.draggingPointIdx !== -1) {
+                    state.points[state.draggingPointIdx].x = Math.max(10, Math.min(state.width - 10, Math.round(pos.x)));
+                    state.points[state.draggingPointIdx].y = Math.max(10, Math.min(state.height - 10, Math.round(pos.y)));
+                    refreshUI();
+                } else if (state.draggingSymmetry) {
+                    state.symmetryAxisX = Math.max(50, Math.min(state.width - 50, Math.round(pos.x)));
+                    renderCanvas();
+                }
+            }
+        });
+
+        window.addEventListener('mouseup', () => {
+            if (state.isDrawingROI) {
+                state.isDrawingROI = false;
+                state.selectingROIMode = false;
+                const btnZone = document.getElementById('btnSelectZoneMode');
+                btnZone.classList.remove('bg-amber-600', 'text-white');
+                btnZone.classList.add('bg-slate-800', 'text-amber-300');
+
+                if (state.uploadedImage && state.roiBox.w > 35 && state.roiBox.h > 35) {
+                    autoDetectUploadedObject(state.roiBox);
+                } else {
+                    setStep(2);
+                    renderCanvas();
+                }
+            }
+            state.draggingPointIdx = -1;
+            state.draggingSymmetry = false;
+        });
+
+        canvas.addEventListener('contextmenu', (e) => {
+            e.preventDefault();
+            const pos = getCanvasMousePos(e);
+            const hitIdx = state.points.findIndex(p => Math.hypot(p.x - pos.x, p.y - pos.y) < 14);
+            if (hitIdx !== -1 && state.points.length > 2) {
+                state.points.splice(hitIdx, 1);
+                updateSegmentSliderBounds();
+                refreshUI();
+            }
+        });
+
+        function setStep(stepNumber) {
+            stopAnimation();
+            state.step = stepNumber;
+            state.splineProgress = 1.0;
+            state.pointRevealProgress = 1.0;
+            refreshUI();
+        }
+
+        document.querySelectorAll('.step-btn').forEach(btn => {
+            btn.addEventListener('click', () => {
+                const s = parseInt(btn.getAttribute('data-step'), 10);
+                setStep(s);
+            });
+        });
+
+        document.getElementById('btnPlayFullAnimation').addEventListener('click', startProgressiveAnimation);
+
+        document.getElementById('btnSplitCompare').addEventListener('click', (e) => {
+            state.splitComparison = !state.splitComparison;
+            if (state.splitComparison && state.step < 6) {
+                setStep(7);
+            }
+            e.currentTarget.classList.toggle('bg-cyan-950', state.splitComparison);
+            e.currentTarget.classList.toggle('border-cyan-500', state.splitComparison);
+            renderCanvas();
+        });
+
+        document.getElementById('modeParametric').addEventListener('click', () => {
+            state.mode = 'parametric';
+            document.getElementById('modeParametric').className = 'px-2.5 py-1 rounded text-xs font-medium bg-orange-600 text-white transition-all';
+            document.getElementById('modeExplicit').className = 'px-2.5 py-1 rounded text-xs font-medium text-slate-400 hover:text-white transition-all';
+            document.getElementById('eqFormulaSubtitle').textContent = 'Xᵢ(t) = aₓ + bₓ(t-tᵢ) + cₓ(t-tᵢ)² + dₓ(t-tᵢ)³  |  Yᵢ(t) = aᵧ + bᵧ(t-tᵢ) + cᵧ(t-tᵢ)² + dᵧ(t-tᵢ)³';
+            refreshUI();
+        });
+
+        document.getElementById('modeExplicit').addEventListener('click', () => {
+            state.mode = 'explicit';
+            document.getElementById('modeExplicit').className = 'px-2.5 py-1 rounded text-xs font-medium bg-orange-600 text-white transition-all';
+            document.getElementById('modeParametric').className = 'px-2.5 py-1 rounded text-xs font-medium text-slate-400 hover:text-white transition-all';
+            document.getElementById('eqFormulaSubtitle').textContent = 'Sᵢ(y) = aᵢ + bᵢ(y-yᵢ) + cᵢ(y-yᵢ)² + dᵢ(y-yᵢ)³  (Coordenadas ordenadas monótonamente)';
+            refreshUI();
+        });
+
+        document.getElementById('imageUpload').addEventListener('change', (e) => {
+            const file = e.target.files[0];
+            if (!file) return;
+            const reader = new FileReader();
+            reader.onload = (event) => {
+                const img = new Image();
+                img.onload = () => {
+                    state.uploadedImage = img;
+                    autoDetectUploadedObject();
+                    // Quedarse en el Paso 1 (Pieza Original limpia) hasta que el usuario pulse Play o cambie de paso
+                    setStep(1);
+                    showToast('Imagen lista en Paso 1. Pulsa "Animación Progresiva (1 → 7)" para iniciar todo el proceso.');
+                };
+                img.src = event.target.result;
+            };
+            reader.readAsDataURL(file);
+            e.target.value = '';
+        });
+
+        document.getElementById('btnAutoRepairToggle').addEventListener('click', () => {
+            state.autoRepairCutout = !state.autoRepairCutout;
+            const lbl = document.getElementById('lblAutoRepair');
+            const btn = document.getElementById('btnAutoRepairToggle');
+            if (state.autoRepairCutout) {
+                lbl.textContent = 'Autoreconstruir Parte Cortada: ON';
+                btn.classList.add('bg-emerald-600/30', 'text-emerald-200', 'border-emerald-500/50');
+                btn.classList.remove('bg-slate-800', 'text-slate-300', 'border-slate-700');
+            } else {
+                lbl.textContent = 'Autoreconstruir Parte Cortada: OFF';
+                btn.classList.remove('bg-emerald-600/30', 'text-emerald-200', 'border-emerald-500/50');
+                btn.classList.add('bg-slate-800', 'text-slate-300', 'border-slate-700');
+            }
+            if (state.uploadedImage) {
+                autoDetectUploadedObject();
+            }
+        });
+
+        document.getElementById('btnAutoDetect').addEventListener('click', () => {
+            autoDetectUploadedObject();
+            setStep(1);
+        });
+
+        document.getElementById('btnLoadPreset').addEventListener('click', () => {
+            loadKeruPreset();
+            setStep(1);
+        });
+
+        document.getElementById('btnFullContourMode').addEventListener('click', () => {
+            state.fullObjectContour = !state.fullObjectContour;
+            const lbl = document.getElementById('lblContourScope');
+            const btn = document.getElementById('btnFullContourMode');
+            if (state.fullObjectContour) {
+                lbl.textContent = 'Contorno Completo (Toda la Figura)';
+                btn.classList.add('bg-orange-600/30', 'text-orange-200', 'border-orange-500/50');
+                btn.classList.remove('bg-slate-800', 'text-slate-300', 'border-slate-700');
+            } else {
+                lbl.textContent = 'Solo Mitad Derecha';
+                btn.classList.remove('bg-orange-600/30', 'text-orange-200', 'border-orange-500/50');
+                btn.classList.add('bg-slate-800', 'text-slate-300', 'border-slate-700');
+            }
+            if (state.uploadedImage) {
+                autoDetectUploadedObject();
+            } else {
+                loadKeruPreset();
+            }
+        });
+
+        document.getElementById('btnSelectZoneMode').addEventListener('click', () => {
+            state.selectingROIMode = !state.selectingROIMode;
+            state.showROI = true;
+            const btnZone = document.getElementById('btnSelectZoneMode');
+            if (state.selectingROIMode) {
+                btnZone.classList.remove('bg-slate-800', 'text-amber-300');
+                btnZone.classList.add('bg-amber-600', 'text-white');
+                showToast('Arrastra un recuadro sobre la pieza para elegir el área y autodetectar sus puntos');
+            } else {
+                btnZone.classList.remove('bg-amber-600', 'text-white');
+                btnZone.classList.add('bg-slate-800', 'text-amber-300');
+            }
+            renderCanvas();
+        });
+
+        document.getElementById('btnMirrorLeftToRight').addEventListener('click', () => {
+            mirrorLeftProfileToRight();
+            if (state.step < 5) setStep(6);
+        });
+
+        document.getElementById('btnToggleSymmetry').addEventListener('click', () => {
+            state.showSymmetry = !state.showSymmetry;
+            renderCanvas();
+        });
+
+        document.getElementById('btnUndoPoint').addEventListener('click', () => {
+            if (state.points.length > 2) {
+                state.points.pop();
+                updateSegmentSliderBounds();
+                refreshUI();
+            }
+        });
+
+        document.getElementById('btnClearPoints').addEventListener('click', () => {
+            state.points = [
+                { x: 495, y: 150 },
+                { x: 495, y: 450 }
+            ];
+            updateSegmentSliderBounds();
+            refreshUI();
+        });
+
+        document.getElementById('sliderSegments').addEventListener('input', (e) => {
+            state.activeSegmentsCount = parseInt(e.target.value, 10);
+            const maxSegs = Math.max(1, getTotalSegmentsCount());
+            document.getElementById('lblActiveSegments').textContent = `${state.activeSegmentsCount} de ${maxSegs} tramos`;
+            if (state.step !== 4) setStep(4);
+            else renderCanvas();
+        });
+
+        document.getElementById('sliderSensitivity').addEventListener('input', (e) => {
+            state.edgeThreshold = parseInt(e.target.value, 10);
+            document.getElementById('lblSensitivity').textContent = state.edgeThreshold;
+            if (state.uploadedImage) {
+                autoDetectUploadedObject();
+            }
+        });
+
+        document.getElementById('sliderBgOpacity').addEventListener('input', (e) => {
+            state.bgOpacity = parseInt(e.target.value, 10) / 100;
+            document.getElementById('lblBgOpacity').textContent = `${e.target.value}%`;
+            renderCanvas();
+        });
+
+        document.getElementById('chkShowGrid').addEventListener('change', (e) => {
+            state.showGrid = e.target.checked;
+            renderCanvas();
+        });
+
+        document.getElementById('chkFillPolygon').addEventListener('change', (e) => {
+            state.fillPolygon = e.target.checked;
+            renderCanvas();
+        });
+
+        document.querySelectorAll('.tab-btn').forEach(btn => {
+            btn.addEventListener('click', () => {
+                const targetId = btn.getAttribute('data-tab');
+                document.querySelectorAll('.tab-btn').forEach(b => {
+                    b.className = 'tab-btn py-2 px-3 rounded-lg text-xs font-semibold text-slate-400 hover:text-white transition-all flex items-center justify-center gap-1.5';
+                });
+                btn.className = 'tab-btn py-2 px-3 rounded-lg text-xs font-semibold bg-slate-800 text-orange-400 border border-slate-700 transition-all flex items-center justify-center gap-1.5';
+
+                document.querySelectorAll('.tab-content').forEach(panel => {
+                    panel.classList.add('hidden');
+                });
+                document.getElementById(targetId).classList.remove('hidden');
+            });
+        });
+
+        window.onload = function () {
+            loadKeruPreset();
+            setStep(1);
+        };
+    </script>
+</body>
+</html>
